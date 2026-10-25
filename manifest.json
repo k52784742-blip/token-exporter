@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "通用凭证导出器",
   "author": "Faynt",
-  "version": "6.3.0",
+  "version": "6.3.1",
   "description": "导出并恢复网页登录态：整包保存 cookie 与 storage，也能在任意站点抓取出现过的 token。",
   "permissions": [
     "storage",
