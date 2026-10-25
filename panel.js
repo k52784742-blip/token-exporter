@@ -627,7 +627,7 @@
             <div class="sub">${highlight(String(sub).slice(0, 26))}</div>
           </div>
           ${row.refresh_token ? '<span class="dot-refresh"></span>' : ''}
-          <span class="pill ${pillCls}">${esc(row.expiresAt ? humanLeftLong(left) : '无期限')}</span>
+          <span class="pill ${pillCls}">${esc(row.expiresAt ? humanLeftLong(left) : '到期未知')}</span>
           ${state.selectMode ? '' : '<button class="detail-btn" data-detail="' + esc(key) + '" title="详情">›</button>'}
         </div>`;
     }).join('');
@@ -738,7 +738,7 @@
             <span class="dv mono">${esc(row.auth_raw.account.uin)}</span>
             <button class="copy-mini" data-copy-field="uin">复制</button>
           </div>` : ''}
-          <div class="drow"><span class="dk">access</span><span class="dv ${expiryLevel(row.expiresAt, now) === 'expired' ? 'bad' : ''}">${esc(row.expiresAt ? humanLeftLong(left) : '无期限')}</span></div>
+          <div class="drow"><span class="dk">access</span><span class="dv ${expiryLevel(row.expiresAt, now) === 'expired' ? 'bad' : ''}">${esc(row.expiresAt ? humanLeftLong(left) : '到期未知')}</span></div>
           <div class="drow"><span class="dk">refresh</span><span class="dv ${rleft <= 0 && row.refreshExpiresAt ? 'bad' : ''}">${esc(row.refreshExpiresAt && row.refresh_token ? humanLeftLong(rleft) : '无')}</span></div>
           ${row.note ? `<div class="drow"><span class="dk">备注</span><span class="dv">${esc(row.note)}</span></div>` : ''}
           ${id.scopes.length ? `<div class="drow"><span class="dk">scope</span><span class="dv mono small">${esc(id.scopes.join(' '))}</span></div>` : ''}
@@ -1119,11 +1119,14 @@
 
     const dead = (r.results || []).filter((x) => !x.alive);
     const alive = (r.results || []).filter((x) => x.alive);
+    const unk = r.unknown || 0;
+    const methodLabel = (m) => (m === 'remote' ? '服务端' : m === 'unknown' ? '无到期时间' : '本地');
+
     const rowHtml = (x) => `
       <div class="drow">
         <span class="dk">${x.alive ? '有效' : '失效'}</span>
         <span class="dv${x.alive ? '' : ' bad'}">${esc(x.name)}<br>
-          <span class="dv small">${esc(x.detail)} · ${x.method === 'remote' ? '服务端' : '本地'}</span>
+          <span class="dv small">${esc(x.detail)} · ${methodLabel(x.method)}</span>
         </span>
       </div>`;
 
@@ -1133,7 +1136,7 @@
     wrap.innerHTML = `
       <div class="sheet-box">
         <div class="sheet-head">
-          <span class="sheet-title">体检 · ${r.alive} 有效 / ${r.dead} 失效</span>
+          <span class="sheet-title">体检 · ${r.alive} 有效 / ${r.dead} 失效${unk ? ` / ${unk} 无法判断` : ''}</span>
           <button class="icon-btn" data-x="close">✕</button>
         </div>
         <div class="sheet-body">

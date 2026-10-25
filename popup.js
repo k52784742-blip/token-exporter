@@ -264,7 +264,7 @@ function renderPool() {
     const canRefresh = !!row.refresh_token;
 
     const pillCls = lv === 'expired' ? 'bad' : (lv === 'urgent' || lv === 'warning') ? 'warn' : 'ok';
-    const pillText = row.expiresAt ? humanLeftLong(left) : '无期限';
+    const pillText = row.expiresAt ? humanLeftLong(left) : '到期未知';
 
     return `
       <div class="item${checked ? ' selected' : ''}${row.enabled === false ? ' disabled' : ''}" data-key="${escapeHtmlSafe(key)}">
@@ -408,7 +408,7 @@ async function openDetail(key) {
       <span class="dv mono">${escapeHtmlSafe(row.auth_raw.account.uin)}</span>
       <button class="copy-mini" data-copy-field="uin" title="复制 UIN">复制</button>
     </div>` : ''}
-    <div class="drow"><span class="dk">access</span><span class="dv ${expiryLevel(row.expiresAt, now) === 'expired' ? 'bad' : ''}">${row.expiresAt ? humanLeftLong(left) : '无期限'}</span></div>
+    <div class="drow"><span class="dk">access</span><span class="dv ${expiryLevel(row.expiresAt, now) === 'expired' ? 'bad' : ''}">${row.expiresAt ? humanLeftLong(left) : '到期未知'}</span></div>
     <div class="drow"><span class="dk">refresh</span><span class="dv ${rleft <= 0 && row.refreshExpiresAt ? 'bad' : ''}">${row.refreshExpiresAt ? (row.refresh_token ? humanLeftLong(rleft) : '无') : '无'}</span></div>
     ${row.note ? `<div class="drow"><span class="dk">备注</span><span class="dv">${escapeHtmlSafe(row.note)}</span></div>` : ''}
     ${id.scopes.length ? `<div class="drow"><span class="dk">scope</span><span class="dv mono small">${escapeHtmlSafe(id.scopes.join(' '))}</span></div>` : ''}
@@ -823,6 +823,23 @@ async function removeExpired() {
   }
 }
 
+/** 清掉过期的 + 压根不像 token 的脏数据 */
+async function cleanGarbage() {
+  if (!state.pool.length) return setStatus('凭证池是空的', 'err');
+  if (!confirm('清掉已过期的，和不像 token 的条目？\n\n建议先点「备份」再清。')) return;
+
+  const r = await send({ type: 'clean-garbage' });
+  if (!r?.ok) return setStatus('清理失败：' + (r?.error || '未知'), 'err');
+
+  await refreshAll();
+  renderList();
+
+  if (!r.removed) return setStatus('没有需要清理的', 'ok');
+  const sample = (r.dropped || []).slice(0, 3)
+    .map((x) => `${x.name}（${x.reason}）`).join('、');
+  setStatus(`已清理 ${r.removed} 个${sample ? '：' + sample : ''}`, 'ok');
+}
+
 /** 整池体检：能打服务端的打一遍，抓来的只看本地时间 */
 async function checkAll() {
   if (!state.pool.length) return setStatus('凭证池是空的', 'err');
@@ -842,10 +859,11 @@ async function checkAll() {
   state.healthResult = r;
   renderHealth(r);
 
+  const unk = r.unknown || 0;
   if (r.dead) {
-    setStatus(`体检完成：${r.alive} 个有效，${r.dead} 个失效`, 'err');
+    setStatus(`体检完成：${r.alive} 个有效，${r.dead} 个失效${unk ? `，${unk} 个无法判断` : ''}`, 'err');
   } else {
-    setStatus(`体检完成：${r.alive} 个全部有效`, 'ok');
+    setStatus(`体检完成：${r.alive} 个全部有效${unk ? `，${unk} 个无法判断` : ''}`, 'ok');
   }
 }
 
@@ -854,14 +872,19 @@ function renderHealth(r) {
   const dead = (r.results || []).filter((x) => !x.alive);
   const alive = (r.results || []).filter((x) => x.alive);
 
-  $('detail-title').textContent = `体检结果 · ${r.alive} 有效 / ${r.dead} 失效`;
+  const unknown = r.unknown || 0;
+  $('detail-title').textContent = unknown
+    ? `体检结果 · ${r.alive} 有效 / ${r.dead} 失效 / ${unknown} 无法判断`
+    : `体检结果 · ${r.alive} 有效 / ${r.dead} 失效`;
+
+  const methodLabel = (m) => (m === 'remote' ? '服务端' : m === 'unknown' ? '无到期时间' : '本地');
 
   const row = (x) => `
     <div class="drow">
       <span class="dk">${x.alive ? '有效' : '失效'}</span>
       <span class="dv${x.alive ? '' : ' bad'}">
         ${escapeHtmlSafe(x.name)}<br>
-        <span class="dv small">${escapeHtmlSafe(x.detail)} · ${x.method === 'remote' ? '服务端' : '本地'}</span>
+        <span class="dv small">${escapeHtmlSafe(x.detail)} · ${methodLabel(x.method)}</span>
       </span>
     </div>`;
 
@@ -1098,6 +1121,7 @@ function bind() {
 
   // 清理过期
   $('btn-clean-expired').addEventListener('click', removeExpired);
+  $('btn-clean-garbage').addEventListener('click', cleanGarbage);
   $('btn-check-all').addEventListener('click', checkAll);
   $('btn-site-toggle').addEventListener('click', toggleSiteRule);
 

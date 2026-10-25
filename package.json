@@ -1,6 +1,6 @@
 {
   "name": "token-exporter",
-  "version": "4.1.1",
+  "version": "4.1.2",
   "description": "Chrome/Edge 扩展：已知平台走官方授权导出完整 token；任意站点可抓取页面 token / cookie 并导出",
   "private": true,
   "author": "Faynt",

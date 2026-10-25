@@ -77,10 +77,56 @@ async function removeRow(key) {
 }
 
 // 抓到的 token 先落盘。同一条 token 只留一份。
+// 这里的过滤要严一点：早先只卡长度 20，导致用户名、UUID、base64 图片片段
+// 全被当成 token 收进池子，体检一看全是失效。
+function plausibleToken(t) {
+  if (!t || typeof t !== 'string') return false;
+  const s = t.trim();
+  if (s.length < 16 || s.length > 20000) return false;
+
+  // 带空格 / 换行的不是 token
+  if (/\s/.test(s)) return false;
+
+  // 明显的非 token：URL、JSON、纯数字、纯十六进制哈希（长度不对）、
+  // 常见单词、邮箱
+  if (/^https?:\/\//i.test(s)) return false;
+  if (/^[{[]/.test(s)) return false;
+  if (/^\d+$/.test(s)) return false;
+  if (/^[0-9a-f]{32}$/i.test(s)) return false;          // MD5
+  if (/^[0-9a-f]{40}$/i.test(s)) return false;          // SHA1
+  if (/^[0-9a-f]{64}$/i.test(s)) return false;          // SHA256
+  if (/^[0-9a-f-]{36}$/i.test(s)) return false;         // UUID
+  if (/^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(s)) return false;  // 邮箱
+  if (/^(true|false|null|undefined|nan)$/i.test(s)) return false;
+
+  // JWT：三段式，第一段能 base64 解出 {"alg":
+  const parts = s.split('.');
+  if (parts.length === 3) {
+    try {
+      const head = atob(parts[0].replace(/-/g, '+').replace(/_/g, '/'));
+      if (head.includes('alg')) return true;
+    } catch (e) {}
+    // 解不出来也允许，有些 token 不是标准 JWT
+    if (/^[A-Za-z0-9_-]{10,}$/.test(parts[0]) && /^[A-Za-z0-9_-]{10,}$/.test(parts[1])) return true;
+  }
+
+  // 非 JWT：要求足够长且字符集像 token（base64url / hex / 带连字符）
+  if (s.length < 20) return false;
+  if (!/^[A-Za-z0-9_\-+/=.]+$/.test(s)) return false;
+
+  // 全小写字母+数字、没有混合大小写、没有符号 —— 很可能是 slug 或 uuid
+  const hasUpper = /[A-Z]/.test(s);
+  const hasDigit = /\d/.test(s);
+  const hasSymbol = /[_\-+/=.]/.test(s);
+  if (!hasUpper && !hasSymbol) return false;   // 纯小写+数字，多半不是
+  if (!hasDigit && !hasSymbol) return false;   // 纯字母，多半不是
+
+  return true;
+}
+
 async function remember(token, kind, source, host) {
-  if (!token || typeof token !== 'string') return false;
+  if (!plausibleToken(token)) return false;
   const t = token.trim();
-  if (t.length < 20) return false;
 
   const key = hashStr(t);
   const list = await getCaptured();
@@ -416,6 +462,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
 
+        case 'clean-garbage': {
+          // 清掉两种东西：已经过期的，和压根不像 token 的（历史脏数据）
+          const now = Date.now();
+          const before = await getPool();
+          const kept = [];
+          const dropped = [];
+
+          for (const r of before) {
+            const expired = r.expiresAt && r.expiresAt <= now;
+            const garbage = !plausibleToken(r.access_token);
+            if (expired || garbage) {
+              dropped.push({
+                name: r.nickname || String(r.uid || '').slice(0, 12) || '(未命名)',
+                reason: expired ? '已过期' : '不是 token',
+              });
+            } else {
+              kept.push(r);
+            }
+          }
+
+          await setPool(kept);
+          sendResponse({ ok: true, pool: kept, removed: dropped.length, dropped: dropped.slice(0, 20) });
+          break;
+        }
+
         case 'clear-pool': {
           await setPool([]);
           sendResponse({ ok: true });
@@ -537,8 +608,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           const platform = platformById(row.platform, await getCustom());
           if (!platform || platform.mode !== 'device') {
-            // 抓来的凭证没有统一的校验口子，只能看本地到期时间
-            const alive = (row.expiresAt || 0) > Date.now();
+            // 抓来的凭证没有统一的校验口子，只能看本地到期时间。
+            // 注意：没有 expiresAt（0）不等于过期 —— 那是「不知道什么时候过期」，
+            // 界面显示「无期限」，这里不能判死，否则和界面自相矛盾。
+            if (!row.expiresAt) {
+              return sendResponse({
+                ok: true,
+                alive: true,
+                method: 'unknown',
+                detail: '无到期时间（本地无法判断）',
+              });
+            }
+            const alive = row.expiresAt > Date.now();
             return sendResponse({
               ok: true,
               alive,
@@ -597,6 +678,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const results = [];
           let alive = 0;
           let dead = 0;
+          let unknown = 0;
 
           for (const row of pool) {
             const platform = platformById(row.platform, custom);
@@ -604,7 +686,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const name = row.nickname || String(row.uid || '').slice(0, 10);
 
             if (!platform || platform.mode !== 'device') {
-              const ok = (row.expiresAt || 0) > Date.now();
+              // 没有到期时间的抓取凭证：本地判断不了，单独归一类，别混进「失效」
+              if (!row.expiresAt) {
+                results.push({ key, name, alive: true, method: 'unknown', detail: '无到期时间' });
+                unknown++;
+                continue;
+              }
+              const ok = row.expiresAt > Date.now();
               results.push({ key, name, alive: ok, method: 'local', detail: ok ? '未过期' : '已过期' });
               if (ok) alive++; else dead++;
               continue;
@@ -626,7 +714,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
           }
 
-          sendResponse({ ok: true, results, alive, dead, total: pool.length });
+          sendResponse({ ok: true, results, alive, dead, unknown, total: pool.length });
           break;
         }
 
