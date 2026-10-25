@@ -1,0 +1,27 @@
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+*.zip
+*.crx
+*.pem
+
+# 本地开发 / 测试产物
+_preview-*
+_audit.js
+_test/
+*.log
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# 敏感数据：凭证导出结果绝不应提交
+tokens-*.json
+workbuddy-accounts-*.json
+*.token
+secrets.json

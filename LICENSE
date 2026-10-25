@@ -1,0 +1,156 @@
+# 非商业使用许可协议（PolyForm Noncommercial 1.0.0 中文参考版）
+
+Copyright (c) 2026 Faynt
+
+---
+
+## 简体中文参考译文
+
+> 本译文仅为方便阅读。以英文原文（见下方）为唯一具有法律效力的版本。
+
+### 一、许可授予
+
+在遵守本协议全部条款的前提下，版权持有人授予你一项**免费、非独占、不可转让**的许可，
+允许你为**任何非商业目的**使用、复制、修改、分发本软件及其衍生作品。
+
+### 二、非商业目的
+
+"非商业目的"指**不以商业利益或金钱报酬为主要目的**的使用，包括但不限于：
+
+- 个人学习、研究、自用
+- 教学、学术研究
+- 公益组织、慈善机构的内部使用
+- 为开源项目或非营利项目做贡献
+
+### 三、明确禁止（商用与倒卖）
+
+**未经版权持有人书面授权，严禁**：
+
+1. **任何商业使用** —— 包括但不限于：将其用于商业产品、商业服务、企业内部生产经营、
+   为客户提供有偿服务、作为 SaaS 或 API 服务对外收费。
+2. **倒卖与转售** —— 包括但不限于：出售本软件或其修改版、在电商平台或社群中付费分发、
+   打包进付费课程或付费资源包、以"代部署""代配置"等名义收费。
+3. **二次授权** —— 将本软件或其衍生作品以商业条款再许可给第三方。
+4. **去除或隐藏署名** —— 删除、遮蔽、修改本协议、版权声明或作者署名（Faynt）。
+5. **用于违反目标网站服务条款或当地法律法规的用途。**
+
+### 四、商业授权
+
+如需商业使用，必须事先取得版权持有人的**书面商业授权**。
+联系方式见项目仓库。
+
+### 五、衍生作品
+
+你可以修改本软件，但：
+
+- 修改版必须以**本协议或更严格的协议**分发；
+- 必须保留原始版权声明与作者署名；
+- 不得将修改版用于本协议禁止的商业用途。
+
+### 六、免责声明
+
+本软件按**"现状"**提供，不附带任何明示或默示的担保，包括但不限于对适销性、
+特定用途适用性和非侵权性的担保。
+
+在任何情况下，作者或版权持有人均不对任何索赔、损害或其他责任负责，
+无论是在合同诉讼、侵权行为还是其他方面，由本软件或本软件的使用或其他交易引起、
+产生或与之相关。
+
+**使用者需自行承担使用本软件的全部风险，包括但不限于账号风险、数据丢失、
+以及因违反第三方服务条款而产生的后果。**
+
+---
+
+## English Original (PolyForm Noncommercial 1.0.0)
+
+Copyright (c) 2026 Faynt
+
+### Acceptance
+
+In order to get any license under these terms, you must agree to them as both strict
+obligations and conditions to your license. All rights are reserved except those
+expressly granted in these terms.
+
+### Copyright License
+
+The licensor grants you a copyright license for the software to do everything you
+might want to do with the software that would otherwise infringe the licensor's
+copyright in it for any permitted purpose. However, you may only distribute the
+software according to the Distribution License section, and you may not make changes
+or new works based on the software according to the Changes and New Works License
+section.
+
+### Distribution License
+
+The licensor grants you an additional copyright license to distribute copies of the
+software. Your license to distribute covers distributing the software with changes
+and new works permitted by the Changes and New Works License.
+
+### Notices
+
+You must ensure that anyone who gets a copy of any part of the software from you also
+gets a copy of these terms or the URL for them above, as well as copies of any
+plain-text lines that begin with "Required Notice:" or "Attribution Notice:" in the
+software documentation or source code.
+
+### Changes and New Works License
+
+The licensor grants you an additional copyright license to make changes and new works
+based on the software for any permitted purpose.
+
+### Noncommercial Purposes
+
+Any noncommercial purpose is a permitted purpose.
+
+### Personal Uses
+
+Personal use for research, experiment, and testing for the benefit of public
+knowledge, personal study, private entertainment, hobby projects, amateur pursuits, or
+religious observance, without any anticipated commercial application, is use for a
+permitted purpose.
+
+### Noncommercial Organizations
+
+Use by any charitable organization, educational institution, public research
+organization, public safety or health organization, environmental protection
+organization, or government institution is use for a permitted purpose regardless of
+the source of funding or obligations resulting from the funding.
+
+### Fair Use
+
+You may have "fair use" rights for the software under the law. These terms do not
+limit them.
+
+### No Other Rights
+
+These terms do not allow you to sublicense or transfer any of your licenses to others,
+or prevent the licensor from granting licensees other than you other terms.
+
+### Patent License
+
+The licensor grants you a patent license for the software that covers patent claims
+the licensor can license, or becomes able to license, that you would infringe by using
+the software.
+
+### Noncommercial Rights
+
+The licensor reserves all rights not expressly granted in these terms. In particular,
+the licensor does not grant you any right to use the software for commercial purposes,
+including selling the software, charging for copies of the software, or providing the
+software as a service for a fee.
+
+### Violations
+
+If you violate any of these terms, your license ends immediately.
+
+### No Liability
+
+**As far as the law allows, the software comes as is, without any warranty or
+condition, and the licensor will not be liable to you for any damages arising out of
+these terms or the use or nature of the software, under any kind of legal claim.**
+
+---
+
+## 商业授权联系
+
+如需商业使用许可，请通过项目仓库的 Issue 或作者主页联系 Faynt。

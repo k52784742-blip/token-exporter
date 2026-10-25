@@ -1,0 +1,24 @@
+{
+  "name": "token-exporter",
+  "version": "4.1.0",
+  "description": "Chrome/Edge 扩展：已知平台走官方授权导出完整 token；任意站点可抓取页面 token / cookie 并导出",
+  "private": true,
+  "author": "Faynt",
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check.js",
+    "lint": "node scripts/check.js --strict"
+  },
+  "keywords": [
+    "chrome-extension",
+    "manifest-v3",
+    "oauth",
+    "token",
+    "credential-export"
+  ],
+  "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "node": ">=18"
+  }
+}
+

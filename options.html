@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>凭证导出器 · 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="page">
+    <h1>凭证导出器 · 设置</h1>
+
+    <section>
+      <h2>界面</h2>
+      <label class="check">
+        <input type="checkbox" id="opt-panel">
+        <span>
+          <strong>在页面显示浮窗</strong>
+          <em>每个页面右下角显示一个面板，不用点工具栏图标。会略微影响页面加载。</em>
+        </span>
+      </label>
+    </section>
+
+    <section>
+      <h2>续期</h2>
+      <label class="check">
+        <input type="checkbox" id="opt-autorefresh">
+        <span>
+          <strong>自动续期</strong>
+          <em>access_token 剩余寿命不足 1 天时自动续期，12 小时内最多一次。</em>
+        </span>
+      </label>
+    </section>
+
+    <section>
+      <h2>凭证池</h2>
+      <p class="desc">当前共 <strong id="count">0</strong> 条凭证。凭证明文存放在扩展本地存储中。</p>
+      <div class="row">
+        <button class="btn" id="btn-export">导出全部</button>
+        <button class="btn danger" id="btn-wipe">清空全部</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>抓取范围</h2>
+      <label class="check">
+        <input type="checkbox" id="opt-capture-all">
+        <span>
+          <strong>所有站点都抓</strong>
+          <em>关掉之后只在下面列表里的站点生效，其他站点完全不注入钩子。</em>
+        </span>
+      </label>
+      <textarea id="allow-hosts" placeholder="www.example.com&#10;app.example.com" style="height:96px;margin-top:10px"></textarea>
+      <p class="msg" id="allow-msg"></p>
+    </section>
+
+    <section>
+      <h2>站点例外</h2>
+      <p class="desc">
+        有的站点对脚本钩子比较敏感，页面可能因此出问题。在这里关掉后，那个站点的页面
+        就不会被动过手脚 —— 代价是抓不到东西。刷新页面生效。
+      </p>
+      <div class="row" style="margin-top:0">
+        <input type="text" id="site-host" class="text-input" placeholder="example.com">
+        <button class="btn" id="btn-site-off">关掉这个站</button>
+      </div>
+      <div id="site-list" class="site-list"></div>
+      <p class="msg" id="site-msg"></p>
+    </section>
+
+    <section>
+      <h2>自定义平台</h2>
+      <p class="desc">
+        加一个走设备码授权的平台。接口路径必须是 <code>/v2/plugin/auth/state</code> 那套，
+        否则得单独写适配器。
+      </p>
+      <textarea id="custom-json" placeholder='[
+  {
+    "id": "my-platform",
+    "label": "某平台",
+    "flag": "🌐",
+    "mode": "device",
+    "hosts": ["www.example.com"],
+    "origin": "https://www.example.com",
+    "domain": "www.example.com",
+    "refreshSource": "plugin",
+    "acceptLanguage": "en-US"
+  }
+]'></textarea>
+      <div class="row">
+        <button class="btn primary" id="btn-save-custom">保存</button>
+        <button class="btn" id="btn-reset-custom">恢复内置</button>
+      </div>
+      <p class="msg" id="custom-msg"></p>
+    </section>
+
+    <p class="footer">Faynt · <span id="ver">3.7.0</span></p>
+  </div>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
