@@ -25,3 +25,6 @@ tokens-*.json
 workbuddy-accounts-*.json
 *.token
 secrets.json
+
+# 本地辅助脚本
+推送.cmd
