@@ -117,7 +117,7 @@
     }
   }
 
-  // 有些站点（DeepSeek 之类）把 token 包在 {"value":"<jwt>","__version":"0"} 里。
+  // 有些站点把 token 包在 {"value":"<jwt>","__version":"0"} 这种持久化壳里。
   // 这种包装层很常见（zustand persist / pinia 持久化），单独处理一下，
   // 免得导出时把整个 JSON 当成 token。
   const WRAPPER_KEYS = ['value', 'v', 'data', 'token', 'access_token', 'accessToken', 'jwt', 'content', 'val'];
@@ -547,7 +547,7 @@
 
           const lk = String(k).toLowerCase();
 
-          // 先看是不是 JSON。很多应用（DeepSeek、各种 zustand/pinia 持久化）
+          // 先看是不是 JSON。很多前端框架的持久化插件
           // 存的是 {"value":"<token>","__version":"0"} 这种包装对象。
           // 如果先按 key 名匹配，会把整串 JSON 当成 token 交上去，
           // 后面导出就全废了。所以 JSON 一定要先拆。
@@ -644,7 +644,7 @@
   setTimeout(scanStorage, 3500);
   setTimeout(scanStorage, 9000);
 
-  // 登录后 token 才写进 storage 的情况很常见（DeepSeek 就是）。
+  // 登录后 token 才写进 storage 的情况很常见。
   // 光靠定时扫会漏，所以监听 storage 变化。
   // storage 事件只在「其他同源窗口」触发，本窗口改自己不会触发 —— 所以还要
   // 在 Storage.prototype.setItem 上挂一层，捕获本窗口的写入。

@@ -5,8 +5,8 @@
 import { PRESETS, DEVICE_PATH, LOGIN_PENDING, detectPlatform, platformById } from './platforms.js';
 import {
   looksJwt, parseJwt, normalizeEpoch, hashStr,
-  buildWorkbuddyRow, buildGenericRow, normalizeImport, rowKey,
-  toWorkbuddyExport, toGenericExport,
+  buildDeviceRow, buildGenericRow, normalizeImport, rowKey,
+  toDeviceExport, toGenericExport,
 } from './utils.js';
 
 const K = {
@@ -276,7 +276,7 @@ async function deviceRefresh(row) {
     'X-Auth-Refresh-Source': platform.refreshSource,
     'X-User-Id': row.uid || '',
     'X-Domain': row.domain || platform.domain,
-    'X-CodeBuddy-Request': '1',
+    'X-Requested-With': 'XMLHttpRequest',
     'Accept-Language': platform.acceptLanguage,
   };
 
@@ -297,7 +297,7 @@ async function deviceRefresh(row) {
 
   if (!data.accessToken) return { ok: false, reason: payload.msg || ('HTTP ' + res.status) };
 
-  const next = buildWorkbuddyRow(
+  const next = buildDeviceRow(
     data.accessToken,
     data.refreshToken || row.refresh_token,
     { uid: row.uid, nickname: row.nickname, uin: row.auth_raw?.account?.uin || '' },
@@ -360,7 +360,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const r = await devicePoll(platform, msg.state);
           if (r.status === 'ok') {
             const profile = await deviceProfile(platform, r.data.accessToken);
-            const row = buildWorkbuddyRow(
+            const row = buildDeviceRow(
               r.data.accessToken, r.data.refreshToken || '', profile, platform, r.data
             );
             if (!row.uid) return sendResponse({ ok: true, status: 'error', message: 'token 里没有 uid' });
@@ -535,15 +535,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const allWb = rows0.length > 0 && rows0.every((r) => r.auth_raw);
           const fmt = msg.format && msg.format !== 'auto'
             ? msg.format
-            : (allWb ? 'workbuddy' : 'generic');
+            : (allWb ? 'device' : 'generic');
 
           let out;
           if (fmt === 'raw') {
             out = rows0.map((r) => r.access_token);
           } else if (fmt === 'bearer') {
             out = rows0.map((r) => 'Bearer ' + r.access_token);
-          } else if (fmt === 'workbuddy') {
-            out = rows0.filter((r) => r.auth_raw).map(toWorkbuddyExport);
+          } else if (fmt === 'device') {
+            out = rows0.filter((r) => r.auth_raw).map(toDeviceExport);
           } else if (fmt === 'curl') {
             out = rows0.map((r) => {
               const p = platformById(r.platform, []);

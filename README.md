@@ -23,11 +23,15 @@ Chrome / Edge 扩展。干一件事：把网页上的登录凭证（token / cook
 
 ---
 
-## 内置支持
+## 两种模式
 
-WorkBuddy 国内版 / 国际版（`www.codebuddy.cn`、`www.workbuddy.ai`）。
+### 抓取模式（开箱即用）
 
-走的是官方桌面端那套设备码流程：
+任意站点都能用，不需要配置。钩住页面的网络请求，把出现过的 token 截下来。
+
+### 授权模式（需要配置）
+
+如果你的目标站点走的是设备码授权，可以主动换一份 token。接口形状是：
 
 ```
 POST /v2/plugin/auth/state?platform=CLI   →  state + authUrl
@@ -36,9 +40,12 @@ GET  /v2/plugin/auth/token?state=xxx      →  accessToken + refreshToken
 GET  /v2/plugin/login/account             →  uid / nickname / uin
 ```
 
-导出的 JSON 和官方客户端一致，含 `auth_raw` 那层嵌套（外层毫秒、内层秒）。
+内置两个模板对应这套接口的两种区域端点，**域名是空的，需要你在设置页自己填**。
+填好 host 和 origin 之后，这个站点就会被识别成设备授权模式。
 
-其他站点就是抓取模式，不用配置，装完直接用。
+导出的 JSON 含 `auth_raw` 那层嵌套（外层毫秒、内层秒），和走这套接口的桌面客户端一致。
+
+接口形状不一样的平台，得改 `background.js` 里的适配 —— 见下面「加平台」。
 
 ---
 
@@ -119,8 +126,8 @@ app.example.com
 
 | 格式 | 出来是什么 |
 |---|---|
-| 自动 | 全是 WorkBuddy 账号就走原生格式，否则通用 JSON |
-| WorkBuddy | 官方那 8 个字段 |
+| 自动 | 全是设备授权账号就走原生格式，否则通用 JSON |
+| 设备授权 | 原生那 8 个字段 |
 | 通用 JSON | 带 claims 解码的完整信息 |
 | 纯 token | 一行一个 access_token |
 | Bearer | 一行一个 `Bearer xxx`，直接粘 header |
@@ -169,7 +176,7 @@ access_token 剩不到 1 天会自动续，12 小时最多一次。也能手动�
 
 ### 有效性检查
 
-打开详情会自动查一次。WorkBuddy 账号是真的打一次接口确认，抓来的凭证没有统一校验口子，
+打开详情会自动查一次。设备授权的账号是真的打一次接口确认，抓来的凭证没有统一校验口子，
 只能看本地到期时间。
 
 底部「体检」按钮可以一次把整个池子过一遍，结果按失效 / 有效分组。
@@ -289,12 +296,12 @@ MV3 的 service worker 空闲 30 秒左右就会被杀。内存变量说没就�
 
 数据全在本地，没有任何上传。`background.js` 里所有 `fetch` 只发往你配置的平台域名。
 
-只用 WorkBuddy 的话，可以把 `host_permissions` 收窄：
+只在自己固定的几个站点用的话，可以把 `host_permissions` 收窄：
 
 ```json
 "host_permissions": [
-  "https://www.codebuddy.cn/*",
-  "https://www.workbuddy.ai/*"
+  "https://your-site-a.com/*",
+  "https://your-site-b.com/*"
 ]
 ```
 
@@ -333,7 +340,7 @@ MV3 的 service worker 空闲 30 秒左右就会被杀。内存变量说没就�
 ## 已知限制
 
 - 抓取依赖请求发生，纯内存里、从不发出去的 token 抓不到
-- 授权模式只支持接口形状和 WorkBuddy 一样的平台
+- 授权模式只支持接口形状和内置模板一致的平台
 - 浮窗会稍微影响页面加载（默认关）
 - Firefox 没测过，`world: "MAIN"` 需要 128 以上
 

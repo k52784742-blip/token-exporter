@@ -1,4 +1,4 @@
-import { todayStamp, toWorkbuddyExport, toGenericExport } from './utils.js';
+import { todayStamp, toDeviceExport, toGenericExport } from './utils.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -82,18 +82,50 @@ $('opt-autorefresh').addEventListener('change', async (e) => {
   await send({ type: 'save-settings', settings: { autoRefresh: e.target.checked } });
 });
 
+/* 抓取范围（白名单） */
+
+$('opt-capture-all').addEventListener('change', async (e) => {
+  const all = e.target.checked;
+  $('allow-hosts').disabled = all;
+  await send({ type: 'save-settings', settings: { captureAll: all } });
+
+  if (all) {
+    msg('allow-msg', '已改为所有站点都抓', true);
+  } else {
+    const n = ($('allow-hosts').value || '').split(/[\n,]/).filter((s) => s.trim()).length;
+    msg('allow-msg', n ? `已改为只抓白名单里的 ${n} 个站点` : '白名单是空的，这样哪儿都不会抓 —— 先填几个域名', !n);
+  }
+});
+
+$('allow-hosts').addEventListener('change', async (e) => {
+  const list = e.target.value
+    .split(/[\n,]/)
+    .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, ''))
+    .filter(Boolean);
+
+  await send({ type: 'save-settings', settings: { allowHosts: list } });
+
+  if (!list.length) {
+    msg('allow-msg', '列表是空的。白名单模式下这样哪儿都不抓', false);
+  } else if ($('opt-capture-all').checked) {
+    msg('allow-msg', `已保存 ${list.length} 个站点（当前是全站模式，白名单暂不生效）`, true);
+  } else {
+    msg('allow-msg', `已保存 ${list.length} 个站点`, true);
+  }
+});
+
 $('btn-export').addEventListener('click', async () => {
   const { accounts_v1: pool = [] } = await chrome.storage.local.get('accounts_v1');
   if (!pool.length) return;
   const allWb = pool.every((r) => r.auth_raw);
-  const rows = allWb ? pool.map(toWorkbuddyExport) : pool.map(toGenericExport);
+  const rows = allWb ? pool.map(toDeviceExport) : pool.map(toGenericExport);
   const text = JSON.stringify(rows, null, 2);
   const blob = new Blob([text], { type: 'application/json;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = allWb
-    ? `workbuddy-accounts-${todayStamp()}.json`
+    ? `accounts-${todayStamp()}.json`
     : `tokens-${todayStamp()}.json`;
   document.body.appendChild(a);
   a.click();

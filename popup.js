@@ -142,7 +142,7 @@ function renderHeader() {
     : ICON.scan + ' 扫描本页';
 
   $('hint').innerHTML = isDevice
-    ? '授权走官方接口，access 和 refresh 都能拿到。<br>明文存在本地，公用电脑记得清空。'
+    ? '走设备码授权流程，access 和 refresh 都能拿到。<br>明文存在本地，公用电脑记得清空。'
     : '只记录本页出现过的 token，不上传任何地方。<br>扫不到就刷新页面再点一次。';
 }
 
@@ -254,8 +254,8 @@ function renderPool() {
     const lv = expiryLevel(row.expiresAt, now);
 
     let avCls = 'site';
-    if (row.platform === 'workbuddy-cn') avCls = 'cn';
-    else if (row.platform === 'workbuddy-intl') avCls = 'intl';
+    if (row.platform === 'device-oauth-cn') avCls = 'cn';
+    else if (row.platform === 'device-oauth-intl') avCls = 'intl';
 
     const initial = (row.nickname || row.uid || '?').slice(0, 1).toUpperCase();
     const name = row.nickname || (row.uid ? row.uid.slice(0, 10) : '(未命名)');
@@ -619,8 +619,8 @@ async function doDownload() {
   const ext = extMap[r.format] || 'json';
 
   const host = state.tab?.url ? safeHost(state.tab.url) : 'tokens';
-  const name = r.format === 'workbuddy'
-    ? `workbuddy-accounts-${todayStamp()}.${ext}`
+  const name = r.format === 'device'
+    ? `accounts-${todayStamp()}.${ext}`
     : `tokens-${host}-${todayStamp()}.${ext}`;
 
   const blob = new Blob([text], { type: isPlain ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8' });

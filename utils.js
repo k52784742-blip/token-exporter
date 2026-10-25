@@ -77,8 +77,8 @@ export function rowKey(row) {
   return (row.platform || '') + '|' + (row.uid || String(row.access_token || '').slice(-16));
 }
 
-/** WorkBuddy 格式：顶层毫秒，auth_raw.auth 内秒 */
-export function buildWorkbuddyRow(accessToken, refreshToken, profile, platform, expiryHint) {
+/** 设备授权格式：顶层毫秒，auth_raw.auth 内秒 */
+export function buildDeviceRow(accessToken, refreshToken, profile, platform, expiryHint) {
   const claims = parseJwt(accessToken);
   const rclaims = parseJwt(refreshToken);
 
@@ -90,7 +90,7 @@ export function buildWorkbuddyRow(accessToken, refreshToken, profile, platform, 
   const rexpSec = normalizeEpoch(expiryHint?.refreshExpiresAt) || Number(rclaims.exp) || 0;
 
   return {
-    platform: platform?.id || 'workbuddy-cn',
+    platform: platform?.id || 'device-oauth-cn',
     access_token: accessToken,
     refresh_token: refreshToken,
     uid,
@@ -136,8 +136,8 @@ export function buildGenericRow(accessToken, refreshToken, info = {}) {
   };
 }
 
-/** WorkBuddy 原生格式：只保留 8 个键，顺序固定 */
-export function toWorkbuddyExport(row) {
+/** 设备授权原生格式：只保留 8 个键，顺序固定 */
+export function toDeviceExport(row) {
   return {
     access_token: row.access_token,
     refresh_token: row.refresh_token,
@@ -299,7 +299,7 @@ export function normalizeImport(obj, platformHint) {
   const domain = obj.domain || auth.domain || '';
 
   if (platformHint && platformHint.mode === 'device') {
-    const row = buildWorkbuddyRow(accessToken, refreshToken, {
+    const row = buildDeviceRow(accessToken, refreshToken, {
       uid: obj.uid || acct.uid || '',
       nickname: obj.nickname || acct.nickname || '',
       uin: obj.uin || acct.uin || '',

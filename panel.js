@@ -430,7 +430,7 @@
         <div class="foot-extra">
           <select data-el="format" style="flex:1;font-size:10px;padding:3px 5px">
             <option value="auto">自动</option>
-            <option value="workbuddy">WorkBuddy</option>
+            <option value="device">设备授权</option>
             <option value="generic">通用 JSON</option>
             <option value="raw">纯 token</option>
             <option value="bearer">Bearer</option>
@@ -609,8 +609,8 @@
       const pillCls = lv === 'expired' ? 'bad' : (lv === 'urgent' || lv === 'warning') ? 'warn' : 'ok';
 
       let avCls = 'site';
-      if (row.platform === 'workbuddy-cn') avCls = 'cn';
-      else if (row.platform === 'workbuddy-intl') avCls = 'intl';
+      if (row.platform === 'device-oauth-cn') avCls = 'cn';
+      else if (row.platform === 'device-oauth-intl') avCls = 'intl';
 
       const initial = (row.nickname || row.uid || '?').slice(0, 1).toUpperCase();
       const name = row.nickname || (row.uid ? row.uid.slice(0, 10) : '(未命名)');
@@ -1013,8 +1013,8 @@
     const text = isPlain ? r.rows.join('\n\n') : JSON.stringify(r.rows, null, 2);
     const extMap = { curl: 'sh', env: 'env', raw: 'txt', bearer: 'txt', postman: 'postman_collection.json' };
     const ext = extMap[r.format] || 'json';
-    const name = r.format === 'workbuddy'
-      ? `workbuddy-accounts-${todayStamp()}.${ext}`
+    const name = r.format === 'device'
+      ? `accounts-${todayStamp()}.${ext}`
       : `tokens-${location.hostname}-${todayStamp()}.${ext}`;
 
     const blob = new Blob([text], { type: isPlain ? 'text/plain;charset=utf-8' : 'application/json;charset=utf-8' });
