@@ -62,7 +62,13 @@ export function setDetailsFor(c, fallbackHost) {
   if (!hostOnly && !/^__Host-/i.test(c.name)) d.domain = domain;
   if (c.httpOnly) d.httpOnly = true;
   if (c.sameSite && c.sameSite !== 'unspecified') d.sameSite = c.sameSite;
-  if (c.expirationDate) d.expirationDate = c.expirationDate;
+  // 快照可能是几天前存的，里面短期 cookie 的过期时间早就过了。
+  // 原样写回去 Chrome 会静默拒收（返回 null），恢复就变成「点了没反应」。
+  // 这种情况降级成会话 cookie：浏览器开着就有效，够把登录态救回来。
+  if (c.expirationDate) {
+    if (c.expirationDate * 1000 > Date.now()) d.expirationDate = c.expirationDate;
+    else d.expiredAtSnapshot = true;
+  }
   if (c.partitionKey) d.partitionKey = c.partitionKey;
   return d;
 }
@@ -163,6 +169,57 @@ async function writeStorage(tabId, snap) {
 
 /* ---------------- 快照 / 恢复 ---------------- */
 
+// 猜这份快照是谁的。多个账号在同一站点上换来换去时，
+// 列表里只显示域名根本分不出哪个是哪个。
+// 顺序有讲究：先找人名，再退回 id。uid 那种一串数字看不出是谁，
+// 但在没有昵称的时候总比空着强。
+const WHO_NAME_KEYS = ['nickname', 'nickName', 'nick', 'displayName', 'display_name', 'userName', 'username', 'uname', 'name', 'email', 'account', 'login'];
+const WHO_ID_KEYS = ['uid', 'user_?id', 'userId', 'uin', 'memberId'];
+
+function pickScalar(obj, keys) {
+  if (!obj || typeof obj !== 'object') return '';
+  for (const k of keys) {
+    const re = new RegExp('^' + k + '$', 'i');
+    for (const key of Object.keys(obj)) {
+      if (!re.test(key)) continue;
+      const v = obj[key];
+      if (v == null || typeof v === 'object') continue;
+      const s = String(v).trim();
+      // 太长的多半是 token 或者序列化后的东西，不是人名
+      if (s && s.length <= 40 && !/^ey[A-Za-z0-9_-]{10,}/.test(s)) return s;
+    }
+  }
+  return '';
+}
+
+function guessWho(cookies, local) {
+  // 先看 cookie：那是服务端下发的，一定对应当前这个会话。
+  // localStorage 在换账号时可能还留着上一个人的名字，信它会认错人。
+  for (const c of cookies || []) {
+    if (!/^(nick|nickname|username|displayname|uname|user)$/i.test(c.name)) continue;
+    const v = String(c.value || '').trim();
+    if (v && v.length <= 40 && !/^ey[A-Za-z0-9_-]{10,}/.test(v)) return v;
+  }
+
+  const fromStore = pickScalar(local, WHO_NAME_KEYS) || pickScalar(local, WHO_ID_KEYS);
+  if (fromStore) return fromStore;
+
+  // localStorage 里常见的嵌套用户对象
+  for (const k of Object.keys(local || {})) {
+    if (!/user|account|profile|login|member/i.test(k)) continue;
+    const raw = local[k];
+    if (typeof raw !== 'string' || raw[0] !== '{') continue;
+    try {
+      const o = JSON.parse(raw);
+      for (const cand of [o, o.user, o.data, o.account, o.profile]) {
+        const got = pickScalar(cand, WHO_NAME_KEYS) || pickScalar(cand, WHO_ID_KEYS);
+        if (got) return got;
+      }
+    } catch (e) {}
+  }
+  return '';
+}
+
 export async function snapshotSession(host, tabId, opts = {}) {
   if (!host) return { ok: false, error: '拿不到站点域名' };
 
@@ -241,6 +298,7 @@ export async function snapshotSession(host, tabId, opts = {}) {
       session: Object.keys(storage.session || {}).length,
       authLike: cookies.some((c) => AUTH_HINT.test(c.name))
         || Object.keys(storage.local || {}).some((k) => AUTH_HINT.test(k)),
+      who: guessWho(cookies, storage.local || {}),
     },
   };
 
@@ -270,6 +328,15 @@ export function authScore(snap) {
 
 export const AUTO_MIN_GAP = 5 * 60 * 1000;
 
+// 同一站点上换账号时，旧快照不能就这么被顶掉 —— 收进 alts 里存着，随时能切回去
+const MAX_ALTS = 5;
+
+function sameWho(a, b) {
+  const x = String(a || '').trim().toLowerCase();
+  const y = String(b || '').trim().toLowerCase();
+  return !!x && !!y && x === y;
+}
+
 // 自动快照：页面加载完调一次。
 // 关键点是「不许降级」——登出后 cookie 全没了，这时候存下去等于把能救命的
 // 快照亲手删了。所以只要新状态比旧状态更不像登录态，就一律不写。
@@ -298,11 +365,27 @@ export async function autoSnapshot(host, tabId) {
     return { ok: false, skipped: 'no-auth' };
   }
 
+  // 两边都是登录态、但人是两个：这是换账号，不是登出。
+  // 把原来那份收进 alts，别让第二个账号把第一个账号顶掉。
+  let switched = false;
+  if (old && newScore > 0 && oldScore > 0
+    && old.summary?.who && fresh.summary?.who
+    && !sameWho(old.summary.who, fresh.summary.who)) {
+    const alts = (old.alts || []).filter((a) => !sameWho(a?.summary?.who, fresh.summary.who));
+    const keep = { ...old };
+    delete keep.alts;
+    alts.unshift(keep);
+    fresh.alts = alts.slice(0, MAX_ALTS);
+    switched = true;
+  } else if (old && Array.isArray(old.alts) && old.alts.length) {
+    fresh.alts = old.alts;
+  }
+
   fresh.autoAt = Date.now();
   fresh.auto = true;
   map[host] = fresh;
   await saveMap(map);
-  return { ok: true, host, snap: fresh, replaced: !!old };
+  return { ok: true, host, snap: fresh, replaced: !!old, switched };
 }
 
 export const RESTORE_COOLDOWN = 10 * 60 * 1000;
@@ -363,11 +446,35 @@ export async function maybeAutoRestore(host, tabId) {
   return { ...r, auto: true, tries: tries + 1 };
 }
 
-export async function restoreSession(host, tabId) {
+// 同一个站点可能存了多个账号：主份在 map[host]，其余的挂在 alts 里。
+// who 为空就用主份。
+function pickSnap(snap, who) {
+  if (!snap) return null;
+  if (!who) return snap;
+  if (sameWho(snap.summary?.who, who)) return snap;
+  for (const a of snap.alts || []) if (sameWho(a?.summary?.who, who)) return a;
+  return null;
+}
+
+export async function restoreSession(host, tabId, who) {
   if (!host) return { ok: false, error: '拿不到站点域名' };
   const map = await listSessions();
-  const snap = map[host];
-  if (!snap) return { ok: false, error: '没有这个站点的快照' };
+  const root = map[host];
+  if (!root) return { ok: false, error: '没有这个站点的快照' };
+
+  let snap = pickSnap(root, who);
+  if (!snap) return { ok: false, error: '这个站点下没有该账号的快照' };
+
+  // 用户明确指定了某个账号：把它提成主份，原来的主份退到 alts，
+  // 否则下次页面加载自动恢复时又会被主份盖回去
+  if (who && snap !== root) {
+    const rest = [root, ...(root.alts || [])].filter((x) => x !== snap);
+    snap.alts = rest.slice(0, MAX_ALTS);
+    snap.restoreTries = 0;
+    snap.restoredAt = 0;
+    map[host] = snap;
+    await saveMap(map);
+  }
 
   // cookie 不管当前在哪个页面都能先写
   const report = await writeCookies(snap, host);
@@ -375,9 +482,15 @@ export async function restoreSession(host, tabId) {
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const curHost = tab?.url ? hostOf(tab.url) : '';
 
+  if (!tab) {
+    // 拿不到标签页：cookie 已经写进去了，但 storage 没法写。
+    // 不能装作成功 —— 页面不刷新用户会以为没生效。
+    return { ok: false, error: '拿不到标签页，storage 没写进去', partial: true, ...report };
+  }
+
   if (curHost !== host) {
     // 不在这个站点上，storage 得等页面加载完再写，交给 resumePending
-    await chrome.storage.local.set({ [PENDING_KEY]: { host, at: Date.now(), tabId } });
+    await chrome.storage.local.set({ [PENDING_KEY]: { host, at: Date.now(), tabId, who: snap.summary?.who || '' } });
     // 跳转目标用快照里记的原 URL：https://host/ 会丢掉端口和路径，
     // 本地调试站点（带端口）和挂在子路径下的后台会被跳到错误的地方
     const target = snap.url || ('https://' + host + '/');
@@ -402,7 +515,7 @@ export async function resumePending(tabId, url) {
 
   await chrome.storage.local.remove(PENDING_KEY);
   const map = await listSessions();
-  const snap = map[p.host];
+  const snap = pickSnap(map[p.host], p.who);
   if (!snap) return false;
 
   await writeStorage(tabId, snap);
@@ -410,9 +523,26 @@ export async function resumePending(tabId, url) {
   return true;
 }
 
-export async function removeSession(host) {
+export async function removeSession(host, who) {
   const map = await listSessions();
-  delete map[host];
+  const root = map[host];
+  if (!root) return map;
+
+  // 指定了账号就只删那一个，主份被删时把最新的替补提上来
+  if (who && !sameWho(root.summary?.who, who)) {
+    const alts = (root.alts || []).filter((a) => !sameWho(a?.summary?.who, who));
+    if (alts.length) root.alts = alts;
+    else delete root.alts;
+    map[host] = root;
+  } else if (who && Array.isArray(root.alts) && root.alts.length) {
+    const next = root.alts[0];
+    next.alts = root.alts.slice(1);
+    if (!next.alts.length) delete next.alts;
+    map[host] = next;
+  } else {
+    delete map[host];
+  }
+
   await saveMap(map);
   return map;
 }

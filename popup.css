@@ -437,6 +437,8 @@ select:focus { border-color: var(--accent); }
 
 .sess-tip { font-size: 9.5px; color: #4a5261; }
 .item.sess.current { background: #121c28; }
+.item.sess.alt { opacity: .82; }
+.item.sess.alt .avatar { filter: saturate(.5); }
 .avatar.sess { background: linear-gradient(135deg, #475569, #334155); }
 .avatar.sess.auth { background: linear-gradient(135deg, #34d399, #059669); color: #062018; }
 .cur-tag {
@@ -446,6 +448,21 @@ select:focus { border-color: var(--accent); }
   border-radius: 3px;
   background: #1e3a5f;
   color: #93c5fd;
+  font-size: 9px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+.who-tag {
+  display: inline-block;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #1a2c1f;
+  color: #86efac;
   font-size: 9px;
   font-weight: 500;
   vertical-align: 1px;

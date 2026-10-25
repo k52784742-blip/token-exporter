@@ -262,6 +262,8 @@
     .item.selected { background: #14202e; }
     .item.disabled { opacity: .45; }
     .item.disabled .name { text-decoration: line-through; text-decoration-color: #5f6779; }
+    .item.alt { opacity: .82; }
+    .item.alt .avatar { filter: saturate(.5); }
     .avatar { width: 24px; height: 24px; border-radius: 7px; flex: none;
       display: flex; align-items: center; justify-content: center;
       font-size: 10px; font-weight: 700; color: #fff; }
@@ -275,6 +277,10 @@
     .sub { font-size: 9.5px; color: #5f6779;
       font-family: ui-monospace, Consolas, monospace; white-space: nowrap;
       overflow: hidden; text-overflow: ellipsis; }
+    .who-tag { display: inline-block; max-width: 92px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; vertical-align: 1px;
+      margin-left: 4px; padding: 0 4px; border-radius: 3px;
+      background: #1a2c1f; color: #86efac; font-size: 9px; font-weight: 500; }
     .pill { font-size: 9px; padding: 1px 5px; border-radius: 99px;
       border: 1px solid #2a2f3a; color: #9aa3b5; flex: none;
       font-variant-numeric: tabular-nums; }
@@ -721,31 +727,42 @@
         <span>共 ${hosts.length} 个站点</span>
       </div>`
       + hosts.map((h) => {
-        const s = map[h] || {};
-        const sm = s.summary || {};
-        const bits = [];
-        if (sm.cookies) bits.push(`${sm.cookies} cookie`);
-        if (sm.httpOnly) bits.push(`${sm.httpOnly} HttpOnly`);
-        if (sm.local) bits.push(`${sm.local} 本地项`);
-        if (sm.session) bits.push(`${sm.session} 会话项`);
+        const root = map[h] || {};
+        const rows = [root, ...(root.alts || [])];
+        return rows.map((s, idx) => {
+          const sm = s.summary || {};
+          const isAlt = idx > 0;
+          const who = sm.who || '';
+          const bits = [];
+          if (sm.cookies) bits.push(`${sm.cookies} cookie`);
+          if (sm.httpOnly) bits.push(`${sm.httpOnly} HttpOnly`);
+          if (sm.local) bits.push(`${sm.local} 本地项`);
+          if (sm.session) bits.push(`${sm.session} 会话项`);
+          if ((s.restoreTries || 0) >= 3) bits.push('已失效，需重新登录后存一份');
 
-        return `
-          <div class="item${h === cur ? ' selected' : ''}" data-host="${esc(h)}">
+          const w = esc(who);
+          return `
+          <div class="item${h === cur && !isAlt ? ' selected' : ''}${isAlt ? ' alt' : ''}" data-host="${esc(h)}">
             <div class="avatar ${sm.authLike ? 'cn' : 'site'}">${sm.authLike ? '✓' : '·'}</div>
             <div class="meta">
-              <div class="name">${highlight(h)}</div>
+              <div class="name">${highlight(h)}${who ? ` <span class="who-tag">${w}</span>` : ''}</div>
               <div class="sub">${esc(bits.join(' · ') || '空快照')}</div>
             </div>
             <span class="src-tag">${esc(timeAgo(s.at, now))}</span>
-            <button class="btn tiny" data-srestore="${esc(h)}">恢复</button>
+            <button class="btn tiny" data-srestore="${esc(h)}" data-who="${w}">恢复</button>
           </div>`;
+        }).join('');
       }).join('');
 
     els.list.querySelectorAll('[data-srestore]').forEach((b) => {
-      b.addEventListener('click', (ev) => { ev.stopPropagation(); restoreSession(b.dataset.srestore); });
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); restoreSession(b.dataset.srestore, b.dataset.who); });
     });
     els.list.querySelectorAll('.item').forEach((it) => {
-      it.addEventListener('click', () => restoreSession(it.dataset.host));
+      it.addEventListener('click', (ev) => {
+        if (ev.target.closest('button')) return;
+        const btn = it.querySelector('[data-srestore]');
+        restoreSession(it.dataset.host, btn?.dataset.who || '');
+      });
     });
   }
 
@@ -777,14 +794,15 @@
     setStatus(`${host} 已保存 · ${bits.join(' · ')}`, 'ok');
   }
 
-  async function restoreSession(host) {
+  async function restoreSession(host, who) {
     const target = host || location.hostname;
     if (!state.sessions[target]) return setStatus(`${target} 还没有快照`, 'err');
 
     const same = target === location.hostname;
+    const name = who ? ` ${who} 的` : '';
     const tip = same
-      ? `用快照覆盖 ${target} 当前的登录态？页面会刷新一次。`
-      : `${target} 不在当前页，会跳过去再恢复。继续？`;
+      ? `用${name}快照覆盖 ${target} 当前的登录态？页面会刷新一次。`
+      : `${target} 不在当前页，会跳过去再恢复${who ? ' ' + who : ''}。继续？`;
     if (!confirm(tip)) return;
 
     const tab = await new Promise((res) => {
@@ -793,7 +811,7 @@
       } catch (e) { res(null); }
     });
 
-    const r = await send({ type: 'session-restore', tabId: tab?.tabId, host: target });
+    const r = await send({ type: 'session-restore', tabId: tab?.tabId, host: target, who: who || '' });
     if (!r?.ok) return setStatus('恢复失败：' + (r?.error || '未知'), 'err');
 
     const bits = [`${r.cookies || 0} cookie`];
@@ -1490,3 +1508,6 @@
     init();
   }
 })();
+
+
+

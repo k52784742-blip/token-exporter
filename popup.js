@@ -391,28 +391,35 @@ function renderSessions() {
       <span class="sess-tip">快照含 cookie 与 storage</span>
     </div>`
     + hosts.map((h) => {
-    const s = map[h] || {};
-    const sm = s.summary || {};
-    const isCur = h === cur;
-    const bits = [];
-    if (sm.cookies) bits.push(`${sm.cookies} cookie`);
-    if (sm.httpOnly) bits.push(`${sm.httpOnly} HttpOnly`);
-    if (sm.local) bits.push(`${sm.local} 本地项`);
-    if (sm.session) bits.push(`${sm.session} 会话项`);
-    // 自动恢复试满 3 次还是没成，说明快照本身过期了，得让用户知道别再等
-    if ((s.restoreTries || 0) >= 3) bits.push('已失效，需重新登录后存一份');
+    const root = map[h] || {};
+    // 一个站点可能存了几个账号，主份 + alts 一起铺出来，各占一行
+    const rows = [root, ...(root.alts || [])];
+    return rows.map((s, idx) => {
+      const sm = s.summary || {};
+      const isCur = h === cur;
+      const isAlt = idx > 0;
+      const who = sm.who || '';
+      const bits = [];
+      if (sm.cookies) bits.push(`${sm.cookies} cookie`);
+      if (sm.httpOnly) bits.push(`${sm.httpOnly} HttpOnly`);
+      if (sm.local) bits.push(`${sm.local} 本地项`);
+      if (sm.session) bits.push(`${sm.session} 会话项`);
+      // 自动恢复试满 3 次还是没成，说明快照本身过期了，得让用户知道别再等
+      if ((s.restoreTries || 0) >= 3) bits.push('已失效，需重新登录后存一份');
 
-    return `
-      <div class="item sess${isCur ? ' current' : ''}" data-host="${escapeHtmlSafe(h)}">
+      const w = escapeHtmlSafe(who);
+      return `
+      <div class="item sess${isCur && !isAlt ? ' current' : ''}${isAlt ? ' alt' : ''}" data-host="${escapeHtmlSafe(h)}">
         <div class="avatar sess${sm.authLike ? ' auth' : ''}">${sm.authLike ? '✓' : '·'}</div>
         <div class="meta">
-          <div class="name">${highlight(h)}${isCur ? ' <span class="cur-tag">当前</span>' : ''}</div>
+          <div class="name">${highlight(h)}${isCur && !isAlt ? ' <span class="cur-tag">当前</span>' : ''}${who ? ` <span class="who-tag">${w}</span>` : ''}</div>
           <div class="sub">${escapeHtmlSafe(bits.join(' · ') || '空快照')}</div>
         </div>
         <span class="src-tag">${escapeHtmlSafe(timeAgo(s.at, now))}</span>
-        <button class="btn small" data-srestore="${escapeHtmlSafe(h)}">恢复</button>
-        <button class="icon-mini" data-sdel="${escapeHtmlSafe(h)}" title="删除">${ICON.x}</button>
+        <button class="btn small" data-srestore="${escapeHtmlSafe(h)}" data-who="${w}">恢复</button>
+        <button class="icon-mini" data-sdel="${escapeHtmlSafe(h)}" data-who="${w}" title="删除">${ICON.x}</button>
       </div>`;
+    }).join('');
   }).join('');
 
   // 顺手告诉用户自动保存有没有开着，不然会以为没生效
@@ -423,14 +430,16 @@ function renderSessions() {
   }
 
   el.querySelectorAll('[data-srestore]').forEach((b) => {
-    b.addEventListener('click', (ev) => { ev.stopPropagation(); restoreSessionByHost(b.dataset.srestore); });
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); restoreSessionByHost(b.dataset.srestore, b.dataset.who); });
   });
   el.querySelectorAll('[data-sdel]').forEach((b) => {
     b.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       const h = b.dataset.sdel;
-      if (!confirm(`删除 ${h} 的会话快照？`)) return;
-      const r = await send({ type: 'session-remove', host: h });
+      const who = b.dataset.who || '';
+      const label = who ? `${h} 的 ${who}` : h;
+      if (!confirm(`删除 ${label} 的会话快照？`)) return;
+      const r = await send({ type: 'session-remove', host: h, who });
       if (r?.ok) {
         state.sessions = r.sessions || {};
         renderList();
@@ -439,7 +448,12 @@ function renderSessions() {
     });
   });
   el.querySelectorAll('.item').forEach((it) => {
-    it.addEventListener('click', () => restoreSessionByHost(it.dataset.host));
+    it.addEventListener('click', (ev) => {
+      // 行内按钮已经各自处理过，别再叠一次恢复
+      if (ev.target.closest('button')) return;
+      const btn = it.querySelector('[data-srestore]');
+      restoreSessionByHost(it.dataset.host, btn?.dataset.who || '');
+    });
   });
 }
 
@@ -1090,21 +1104,22 @@ async function saveSessionHere() {
   setStatus(`${host} 已保存 · ${bits.join(' · ')}`, 'ok');
 }
 
-async function restoreSessionByHost(host) {
+async function restoreSessionByHost(host, who) {
   const target = host || (state.tab?.url ? safeHost(state.tab.url) : '');
   if (!target) return setStatus('当前页面拿不到域名', 'err');
   if (!state.sessions[target]) return setStatus(`${target} 还没有快照`, 'err');
 
   const same = state.tab?.url && safeHost(state.tab.url) === target;
+  const name = who ? ` ${who} 的` : '';
   const tip = same
-    ? `用快照覆盖 ${target} 当前的登录态？页面会刷新一次。`
-    : `${target} 不在当前标签页，会跳过去再恢复。继续？`;
+    ? `用${name}快照覆盖 ${target} 当前的登录态？页面会刷新一次。`
+    : `${target} 不在当前标签页，会跳过去再恢复${who ? ' ' + who : ''}。继续？`;
   if (!confirm(tip)) return;
 
   const btn = $('btn-sess-restore');
   if (btn) { btn.disabled = true; btn.textContent = '恢复中…'; }
 
-  const r = await send({ type: 'session-restore', tabId: state.tab.id, host: target });
+  const r = await send({ type: 'session-restore', tabId: state.tab.id, host: target, who: who || '' });
 
   if (btn) { btn.disabled = false; btn.textContent = '恢复本站'; }
 
@@ -1389,3 +1404,4 @@ function bind() {  $('platform').addEventListener('change', (e) => {
 
 bind();
 init();
+

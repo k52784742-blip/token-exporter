@@ -875,12 +875,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const tabId = msg.tabId || sender.tab?.id;
           if (!tabId) return sendResponse({ ok: false, error: '拿不到标签页' });
           const host = msg.host || hostOf(sender.tab?.url || '');
-          sendResponse(await restoreSession(host, tabId));
+          sendResponse(await restoreSession(host, tabId, msg.who));
           break;
         }
 
         case 'session-remove': {
-          sendResponse({ ok: true, sessions: await removeSession(msg.host) });
+          sendResponse({ ok: true, sessions: await removeSession(msg.host, msg.who) });
           break;
         }
 
@@ -1009,8 +1009,8 @@ async function maybeAutoSnapshot(tabId, url) {
   if (settings.autoSnapshot === false) return;
   const host = hostOf(url);
   if (!host) return;
-  // 内网、本机、浏览器内部页都不算登录态，别浪费存储
-  if (!/\./.test(host) || /^(localhost|\d+\.\d+\.\d+\.\d+)$/.test(host)) return;
+  // 没有点的主机名是浏览器内部页或单机名，不是登录态
+  if (!/\./.test(host) && host !== 'localhost') return;
   const rules = await getSiteRules();
   if (rules[host]?.snapshot === false) return;
 
