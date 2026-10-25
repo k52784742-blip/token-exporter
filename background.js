@@ -1024,6 +1024,33 @@ async function maybeAutoSnapshot(tabId, url) {
   await autoSnapshot(host, tabId).catch(() => {});
 }
 
+// 整页加载只在导航时触发。单页应用登录完不会刷新页面，
+// 光靠 onUpdated 的话这类站点永远存不下快照。
+// 这里盯着登录接口的响应头，Set-Cookie 一出现就说明刚换了会话。
+const LOGIN_URL_HINT = /(login|signin|sign-in|auth|session|passport|oauth|token|account)/i;
+let lastLoginSnapAt = 0;
+
+try {
+  chrome.webRequest.onCompleted.addListener((d) => {
+    if (d.tabId < 0 || d.frameId) return;
+    if (!/^https?:/.test(d.url || '')) return;
+    if (!LOGIN_URL_HINT.test(d.url)) return;
+
+    const sc = (d.responseHeaders || []).filter((h) => /^set-cookie$/i.test(h.name || ''));
+    if (!sc.length) return;
+
+    // 一个登录流程常常连着好几个请求，攒一下只存一次
+    const now = Date.now();
+    if (now - lastLoginSnapAt < 4000) return;
+    lastLoginSnapAt = now;
+
+    setTimeout(() => {
+      maybeAutoSnapshot(d.tabId, d.url).catch(() => {});
+    }, 1200);
+    // Set-Cookie 属于「额外」响应头，不显式要的话 onCompleted 里看不到
+  }, { urls: ['http://*/*', 'https://*/*'] }, ['responseHeaders', 'extraHeaders']);
+} catch (e) {}
+
 // 12 小时最多续一次，免得频繁刷新把号刷进风控
 async function maybeAutoRefresh() {
   const settings = await getSettings();
