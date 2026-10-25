@@ -23,6 +23,7 @@ const state = {
   sortMode: 'urgency',     // urgency | name | added
   filterStatus: 'all',     // all | expired | soon | disabled
   detailKey: null,
+  sDetail: null,
 };
 
 const ICON = {
@@ -377,17 +378,32 @@ function renderSessions() {
   const el = $('list');
   const now = Date.now();
   const map = state.sessions || {};
-  const hosts = Object.keys(map).sort((a, b) => (map[b]?.at || 0) - (map[a]?.at || 0));
   const cur = state.tab?.url ? safeHost(state.tab.url) : '';
 
-  if (!hosts.length) {
+  // 会话页签也吃搜索框：站点域名和账号名都能搜
+  const q = state.query.trim().toLowerCase();
+  const allHosts = Object.keys(map).sort((a, b) => (map[b]?.at || 0) - (map[a]?.at || 0));
+  const hosts = q
+    ? allHosts.filter((h) => {
+      if (h.toLowerCase().includes(q)) return true;
+      const root = map[h] || {};
+      return [root, ...(root.alts || [])].some((s) =>
+        String(s.summary?.who || '').toLowerCase().includes(q));
+    })
+    : allHosts;
+
+  if (!allHosts.length) {
     el.innerHTML = emptyBox('还没有会话快照<br>登录好一个站点，切到「会话」再点「存本站」');
+    return;
+  }
+  if (!hosts.length) {
+    el.innerHTML = emptyBox('没有匹配的站点');
     return;
   }
 
   el.innerHTML = `
     <div class="captured-head">
-      <span>共 ${hosts.length} 个站点</span>
+      <span>共 ${allHosts.length} 个站点${q ? ` · 匹配 ${hosts.length}` : ''}</span>
       <span class="sess-tip">快照含 cookie 与 storage</span>
     </div>`
     + hosts.map((h) => {
@@ -449,10 +465,10 @@ function renderSessions() {
   });
   el.querySelectorAll('.item').forEach((it) => {
     it.addEventListener('click', (ev) => {
-      // 行内按钮已经各自处理过，别再叠一次恢复
+      // 行内按钮已经各自处理过，别再叠一次
       if (ev.target.closest('button')) return;
       const btn = it.querySelector('[data-srestore]');
-      restoreSessionByHost(it.dataset.host, btn?.dataset.who || '');
+      openSessionDetail(it.dataset.host, btn?.dataset.who || '');
     });
   });
 }
@@ -566,6 +582,70 @@ async function openDetail(key) {
 function closeDetail() {
   $('detail').hidden = true;
   state.detailKey = null;
+}
+
+/** 会话详情：点行进来先看清里面有什么，再决定恢复还是删 */
+function openSessionDetail(host, who) {
+  const root = (state.sessions || {})[host];
+  if (!root) return;
+  const rows = [root, ...(root.alts || [])];
+  const snap = who ? rows.find((s) => (s.summary?.who || '') === who) : root;
+  if (!snap) return;
+
+  state.sDetail = { host, who: snap.summary?.who || '' };
+  const sm = snap.summary || {};
+  const now = Date.now();
+
+  const cookies = Array.isArray(snap.cookies) ? snap.cookies : [];
+  const local = snap.storage?.local || {};
+  const session = snap.storage?.session || {};
+  const names = Object.keys(local);
+
+  $('sdetail-title').textContent = host + (sm.who ? ` · ${sm.who}` : '');
+
+  $('sdetail-body').innerHTML = `
+    <div class="drow"><span class="dk">站点</span><span class="dv mono">${escapeHtmlSafe(host)}</span></div>
+    ${sm.who ? `<div class="drow"><span class="dk">账号</span><span class="dv">${escapeHtmlSafe(sm.who)}</span></div>` : ''}
+    <div class="drow"><span class="dk">存于</span><span class="dv">${escapeHtmlSafe(timeAgo(snap.at, now))}${snap.auto ? ' · 自动' : ''}</span></div>
+    <div class="drow"><span class="dk">体积</span><span class="dv">${escapeHtmlSafe(bytesText(snap.bytes || 0))}</span></div>
+    ${snap.restoredAt ? `<div class="drow"><span class="dk">上次恢复</span><span class="dv">${escapeHtmlSafe(timeAgo(snap.restoredAt, now))}${snap.restoreTries ? ` · 试了 ${snap.restoreTries} 次` : ''}</span></div>` : ''}
+    ${(snap.restoreTries || 0) >= 3 ? '<div class="drow"><span class="dk"></span><span class="dv bad">这份快照已经失效了，重新登录后存一份新的</span></div>' : ''}
+
+    <div class="drow col">
+      <span class="dk">cookie · ${cookies.length}</span>
+      ${cookies.length ? `<div class="chip-list">${cookies.slice(0, 40).map((c) => {
+    const tag = c.httpOnly ? ' <i class="mini-tag">HttpOnly</i>' : '';
+    return `<span class="chip">${escapeHtmlSafe(c.name)}${tag}</span>`;
+  }).join('')}${cookies.length > 40 ? `<span class="chip">…还有 ${cookies.length - 40} 个</span>` : ''}</div>`
+      : '<span class="dv dim">无</span>'}
+    </div>
+
+    <div class="drow col">
+      <span class="dk">localStorage · ${names.length}</span>
+      ${names.length ? `<div class="chip-list">${names.slice(0, 40).map((k) =>
+    `<span class="chip">${escapeHtmlSafe(k)}</span>`).join('')}${names.length > 40 ? `<span class="chip">…还有 ${names.length - 40} 个</span>` : ''}</div>`
+      : '<span class="dv dim">无</span>'}
+    </div>
+
+    ${Object.keys(session).length ? `<div class="drow col">
+      <span class="dk">sessionStorage · ${Object.keys(session).length}</span>
+      <div class="chip-list">${Object.keys(session).slice(0, 40).map((k) => `<span class="chip">${escapeHtmlSafe(k)}</span>`).join('')}</div>
+    </div>` : ''}
+  `;
+
+  $('sdetail').hidden = false;
+}
+
+function closeSessionDetail() {
+  $('sdetail').hidden = true;
+  state.sDetail = null;
+}
+
+function bytesText(n) {
+  if (!n) return '—';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+  return (n / 1048576).toFixed(2) + ' MB';
 }
 
 
@@ -1247,8 +1327,7 @@ function bind() {  $('platform').addEventListener('change', (e) => {
   $('restore-file').addEventListener('change', onRestoreFile);
 
   // 详情
-  $('detail-close').addEventListener('click', closeDetail);
-  $('detail').addEventListener('click', (e) => {
+  $('detail-close').addEventListener('click', closeDetail);  $('detail').addEventListener('click', (e) => {
     if (e.target.id === 'detail') closeDetail();
   });
   $('detail-copy-token').addEventListener('click', async () => {
@@ -1326,6 +1405,31 @@ function bind() {  $('platform').addEventListener('change', (e) => {
   $('btn-sess-export').addEventListener('click', exportSessions);
   $('btn-sess-import').addEventListener('click', () => $('sess-file').click());
   $('sess-file').addEventListener('change', onSessionFile);
+
+  // 会话详情
+  $('sdetail-close').addEventListener('click', closeSessionDetail);
+  $('sdetail').addEventListener('click', (e) => {
+    if (e.target.id === 'sdetail') closeSessionDetail();
+  });
+  $('sdetail-restore').addEventListener('click', () => {
+    if (!state.sDetail) return;
+    const { host, who } = state.sDetail;
+    closeSessionDetail();
+    restoreSessionByHost(host, who);
+  });
+  $('sdetail-remove').addEventListener('click', async () => {
+    if (!state.sDetail) return;
+    const { host, who } = state.sDetail;
+    const label = who ? `${host} 的 ${who}` : host;
+    if (!confirm(`删除 ${label} 的会话快照？`)) return;
+    const r = await send({ type: 'session-remove', host, who });
+    if (r?.ok) {
+      state.sessions = r.sessions || {};
+      closeSessionDetail();
+      renderList();
+      setStatus('已删除', 'ok');
+    }
+  });
 
   // 弹窗
   $('modal-cancel').addEventListener('click', () => { $('modal').hidden = true; });

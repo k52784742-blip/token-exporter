@@ -578,6 +578,35 @@ select:focus { border-color: var(--accent); }
 .dv.mono { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
 .dv.small { font-size: 10px; color: var(--text-dim); }
 .dv.bad { color: var(--bad); }
+.dv.dim { color: var(--text-mute); }
+
+/* 会话详情里把 cookie / storage 的键名铺成小块，比一行逗号分隔好认 */
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+.chip {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #12161d;
+  border: 1px solid #1e222b;
+  color: #b8c2d4;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.chip .mini-tag {
+  font-style: normal;
+  color: #86efac;
+  font-size: 9px;
+  opacity: .85;
+}
 
 .tok {
   display: block;

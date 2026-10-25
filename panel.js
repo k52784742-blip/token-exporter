@@ -339,6 +339,12 @@
     .dv.mono { font-family: ui-monospace, Consolas, monospace; font-size: 10px; }
     .dv.small { font-size: 9.5px; color: #9aa3b5; }
     .dv.bad { color: #f87171; }
+    .dv.dim { color: #5f6779; }
+    .chip-list { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+    .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      padding: 1px 5px; border-radius: 4px; background: #12161d; border: 1px solid #1e222b;
+      color: #b8c2d4; font-family: ui-monospace, Consolas, monospace; font-size: 9px; }
+    .chip .mini-tag { font-style: normal; color: #86efac; font-size: 8.5px; opacity: .85; }
     .tok { display: block; background: #0c0e12; border: 1px solid #1e222b;
       border-radius: 5px; padding: 4px 6px; font-family: ui-monospace, Consolas, monospace;
       font-size: 9.5px; color: #93a3bd; word-break: break-all; user-select: text; }
@@ -714,17 +720,32 @@
   function renderSessions() {
     const now = Date.now();
     const map = state.sessions || {};
-    const hosts = Object.keys(map).sort((a, b) => (map[b]?.at || 0) - (map[a]?.at || 0));
     const cur = location.hostname;
 
-    if (!hosts.length) {
+    // 会话页签也吃搜索框：域名和账号名都能搜
+    const q = state.query.trim().toLowerCase();
+    const allHosts = Object.keys(map).sort((a, b) => (map[b]?.at || 0) - (map[a]?.at || 0));
+    const hosts = q
+      ? allHosts.filter((h) => {
+        if (h.toLowerCase().includes(q)) return true;
+        const root = map[h] || {};
+        return [root, ...(root.alts || [])].some((s) =>
+          String(s.summary?.who || '').toLowerCase().includes(q));
+      })
+      : allHosts;
+
+    if (!allHosts.length) {
       els.list.innerHTML = '<div class="empty">还没有会话快照<br>登录好之后点「存本站」</div>';
+      return;
+    }
+    if (!hosts.length) {
+      els.list.innerHTML = `<div class="empty">没找到「${esc(state.query)}」</div>`;
       return;
     }
 
     els.list.innerHTML = `
       <div class="captured-head">
-        <span>共 ${hosts.length} 个站点</span>
+        <span>共 ${allHosts.length} 个站点${q ? ` · 匹配 ${hosts.length}` : ''}</span>
       </div>`
       + hosts.map((h) => {
         const root = map[h] || {};
@@ -761,7 +782,7 @@
       it.addEventListener('click', (ev) => {
         if (ev.target.closest('button')) return;
         const btn = it.querySelector('[data-srestore]');
-        restoreSession(it.dataset.host, btn?.dataset.who || '');
+        openSessionDetail(it.dataset.host, btn?.dataset.who || '');
       });
     });
   }
@@ -1003,8 +1024,94 @@
 
   /* ---------------- 交互 ---------------- */
 
-  function onClick(ev) {
-    const addBtn = ev.target.closest('[data-add]');
+  /** 会话详情：点行先看清里面有什么，再决定恢复还是删 */
+  function openSessionDetail(host, who) {
+    const root0 = (state.sessions || {})[host];
+    if (!root0) return;
+    const rows = [root0, ...(root0.alts || [])];
+    const snap = who ? rows.find((s) => (s.summary?.who || '') === who) : root0;
+    if (!snap) return;
+
+    const sm = snap.summary || {};
+    const now = Date.now();
+    const cookies = Array.isArray(snap.cookies) ? snap.cookies : [];
+    const local = snap.storage?.local || {};
+    const session = snap.storage?.session || {};
+    const names = Object.keys(local);
+    const sname = Object.keys(session);
+
+    const chips = (list) => `<div class="chip-list">${list.join('')}</div>`;
+    const cookieChips = cookies.slice(0, 40).map((c) =>
+      `<span class="chip">${esc(c.name)}${c.httpOnly ? ' <i class="mini-tag">HttpOnly</i>' : ''}</span>`);
+    if (cookies.length > 40) cookieChips.push(`<span class="chip">…还有 ${cookies.length - 40} 个</span>`);
+    const localChips = names.slice(0, 40).map((k) => `<span class="chip">${esc(k)}</span>`);
+    if (names.length > 40) localChips.push(`<span class="chip">…还有 ${names.length - 40} 个</span>`);
+
+    const root = document.getElementById(HOST_ID).shadowRoot;
+    const wrap = document.createElement('div');
+    wrap.className = 'sheet';
+    wrap.innerHTML = `
+      <div class="sheet-box">
+        <div class="sheet-head">
+          <span class="sheet-title">${esc(host)}${sm.who ? ' · ' + esc(sm.who) : ''}</span>
+          <button class="icon-btn" data-x="close">✕</button>
+        </div>
+        <div class="sheet-body">
+          <div class="drow"><span class="dk">站点</span><span class="dv mono">${esc(host)}</span></div>
+          ${sm.who ? `<div class="drow"><span class="dk">账号</span><span class="dv">${esc(sm.who)}</span></div>` : ''}
+          <div class="drow"><span class="dk">存于</span><span class="dv">${esc(timeAgo(snap.at, now))}${snap.auto ? ' · 自动' : ''}</span></div>
+          <div class="drow"><span class="dk">体积</span><span class="dv">${esc(bytesText(snap.bytes || 0))}</span></div>
+          ${snap.restoredAt ? `<div class="drow"><span class="dk">上次恢复</span><span class="dv">${esc(timeAgo(snap.restoredAt, now))}${snap.restoreTries ? ' · 试了 ' + snap.restoreTries + ' 次' : ''}</span></div>` : ''}
+          ${(snap.restoreTries || 0) >= 3 ? '<div class="drow"><span class="dk"></span><span class="dv bad">这份快照已经失效了，重新登录后存一份新的</span></div>' : ''}
+          <div class="drow col">
+            <span class="dk">cookie · ${cookies.length}</span>
+            ${cookies.length ? chips(cookieChips) : '<span class="dv dim">无</span>'}
+          </div>
+          <div class="drow col">
+            <span class="dk">localStorage · ${names.length}</span>
+            ${names.length ? chips(localChips) : '<span class="dv dim">无</span>'}
+          </div>
+          ${sname.length ? `<div class="drow col">
+            <span class="dk">sessionStorage · ${sname.length}</span>
+            ${chips(sname.slice(0, 40).map((k) => `<span class="chip">${esc(k)}</span>`))}
+          </div>` : ''}
+        </div>
+        <div class="sheet-foot">
+          <button class="btn" data-x="srestore">恢复这个账号</button>
+          <button class="btn danger" data-x="sremove">删除快照</button>
+        </div>
+      </div>`;
+    root.appendChild(wrap);
+
+    wrap.addEventListener('click', async (ev) => {
+      if (ev.target === wrap || ev.target.dataset.x === 'close') { wrap.remove(); return; }
+      const act = ev.target.dataset.x;
+      if (!act) return;
+
+      if (act === 'srestore') {
+        wrap.remove();
+        restoreSession(host, sm.who || '');
+      } else if (act === 'sremove') {
+        const label = sm.who ? `${host} 的 ${sm.who}` : host;
+        if (!confirm(`删除 ${label} 的会话快照？`)) return;
+        const r = await send({ type: 'session-remove', host, who: sm.who || '' });
+        if (r?.ok) {
+          wrap.remove();
+          await reload();
+          setStatus('已删除', 'ok');
+        }
+      }
+    });
+  }
+
+  function bytesText(n) {
+    if (!n) return '—';
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(2) + ' MB';
+  }
+
+  function onClick(ev) {    const addBtn = ev.target.closest('[data-add]');
     if (addBtn) return addCaptured(addBtn.dataset.add);
 
     const tabBtn = ev.target.closest('[data-tab]');
