@@ -228,6 +228,8 @@
 
   /* ---------------- 消息（来自 popup / background） ---------------- */
 
+  // 会话快照要用到。只认扩展自己的消息，页面发的伪造不了 ——
+  // chrome.runtime.onMessage 本身就不会收到页面来的消息。
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type === 'rescan-page') {
       try {
@@ -237,6 +239,45 @@
       sendResponse({ ok: true });
       return true;
     }
+
+    if (msg?.type === 'dump-storage') {
+      const out = { local: {}, session: {} };
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          out.local[k] = localStorage.getItem(k);
+        }
+      } catch (e) {}
+      try {
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const k = sessionStorage.key(i);
+          out.session[k] = sessionStorage.getItem(k);
+        }
+      } catch (e) {}
+      sendResponse({ ok: true, data: out });
+      return true;
+    }
+
+    if (msg?.type === 'apply-storage') {
+      const d = msg.data || {};
+      let count = 0;
+      // 清空再写：直接覆盖会留下快照里没有的旧键，有些站点靠残留键判断状态
+      try {
+        localStorage.clear();
+        for (const k in d.local || {}) {
+          try { localStorage.setItem(k, d.local[k]); count++; } catch (e) {}
+        }
+      } catch (e) {}
+      try {
+        sessionStorage.clear();
+        for (const k in d.session || {}) {
+          try { sessionStorage.setItem(k, d.session[k]); count++; } catch (e) {}
+        }
+      } catch (e) {}
+      sendResponse({ ok: true, count });
+      return true;
+    }
+
     return false;
   });
 

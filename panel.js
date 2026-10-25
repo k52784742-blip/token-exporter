@@ -25,6 +25,7 @@
   const state = {
     pool: [],
     captured: [],
+    sessions: {},
     platforms: [],
     settings: {},
     tabView: 'pool',
@@ -410,6 +411,7 @@
           <span class="segmented">
             <button class="seg active" data-tab="pool">池 <span class="count" data-el="poolcount">0</span></button>
             <button class="seg" data-tab="captured">扫 <span class="count" data-el="capcount">0</span></button>
+            <button class="seg" data-tab="session">会话 <span class="count" data-el="sesscount">0</span></button>
           </span>
         </div>
         <div class="list" data-el="list"></div>
@@ -426,6 +428,12 @@
           <button class="btn" data-act="download">下载</button>
           <button class="btn" data-act="refresh">续期</button>
           <button class="btn" data-act="clear">清空</button>
+        </div>
+        <div class="foot" data-el="sessfoot" hidden>
+          <button class="btn primary" data-act="sesssave">存本站</button>
+          <button class="btn" data-act="sessrestore">恢复本站</button>
+          <button class="btn" data-act="sessexport">导出</button>
+          <button class="btn" data-act="sessimport">导入</button>
         </div>
         <div class="foot-extra">
           <select data-el="format" style="flex:1;font-size:10px;padding:3px 5px">
@@ -460,6 +468,8 @@
     els.listTitle = panel.querySelector('[data-el="listtitle"]');
     els.poolCount = panel.querySelector('[data-el="poolcount"]');
     els.capCount = panel.querySelector('[data-el="capcount"]');
+    els.sessCount = panel.querySelector('[data-el="sesscount"]');
+    els.sessFoot = panel.querySelector('[data-el="sessfoot"]');
     els.list = panel.querySelector('[data-el="list"]');
     els.bulkbar = panel.querySelector('[data-el="bulkbar"]');
     els.bulkCount = panel.querySelector('[data-el="bulkcount"]');
@@ -551,7 +561,15 @@
     });
     if (els.poolCount) els.poolCount.textContent = state.pool.length;
     if (els.capCount) els.capCount.textContent = state.captured.length;
-    if (els.listTitle) els.listTitle.textContent = state.tabView === 'pool' ? '凭证池' : '本页扫到';
+    if (els.sessCount) els.sessCount.textContent = Object.keys(state.sessions || {}).length;
+
+    const titles = { pool: '凭证池', captured: '本页扫到', session: '会话快照' };
+    if (els.listTitle) els.listTitle.textContent = titles[state.tabView] || '凭证池';
+
+    const isSess = state.tabView === 'session';
+    const foot = els.panel.querySelector('.foot:not([data-el])');
+    if (foot) foot.hidden = isSess;
+    if (els.sessFoot) els.sessFoot.hidden = !isSess;
   }
 
   function renderList() {
@@ -561,6 +579,7 @@
     renderBulk();
 
     if (state.tabView === 'captured') return renderCaptured();
+    if (state.tabView === 'session') return renderSessions();
     return renderPool();
   }
 
@@ -684,6 +703,143 @@
         addCaptured(b.dataset.add);
       });
     });
+  }
+
+  function renderSessions() {
+    const now = Date.now();
+    const map = state.sessions || {};
+    const hosts = Object.keys(map).sort((a, b) => (map[b]?.at || 0) - (map[a]?.at || 0));
+    const cur = location.hostname;
+
+    if (!hosts.length) {
+      els.list.innerHTML = '<div class="empty">还没有会话快照<br>登录好之后点「存本站」</div>';
+      return;
+    }
+
+    els.list.innerHTML = `
+      <div class="captured-head">
+        <span>共 ${hosts.length} 个站点</span>
+      </div>`
+      + hosts.map((h) => {
+        const s = map[h] || {};
+        const sm = s.summary || {};
+        const bits = [];
+        if (sm.cookies) bits.push(`${sm.cookies} cookie`);
+        if (sm.httpOnly) bits.push(`${sm.httpOnly} HttpOnly`);
+        if (sm.local) bits.push(`${sm.local} 本地项`);
+        if (sm.session) bits.push(`${sm.session} 会话项`);
+
+        return `
+          <div class="item${h === cur ? ' selected' : ''}" data-host="${esc(h)}">
+            <div class="avatar ${sm.authLike ? 'cn' : 'site'}">${sm.authLike ? '✓' : '·'}</div>
+            <div class="meta">
+              <div class="name">${highlight(h)}</div>
+              <div class="sub">${esc(bits.join(' · ') || '空快照')}</div>
+            </div>
+            <span class="src-tag">${esc(timeAgo(s.at, now))}</span>
+            <button class="btn tiny" data-srestore="${esc(h)}">恢复</button>
+          </div>`;
+      }).join('');
+
+    els.list.querySelectorAll('[data-srestore]').forEach((b) => {
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); restoreSession(b.dataset.srestore); });
+    });
+    els.list.querySelectorAll('.item').forEach((it) => {
+      it.addEventListener('click', () => restoreSession(it.dataset.host));
+    });
+  }
+
+  async function saveSession() {
+    const host = location.hostname;
+    const btn = els.panel.querySelector('[data-act="sesssave"]');
+    if (btn) { btn.disabled = true; btn.textContent = '保存中…'; }
+
+    const tab = await new Promise((res) => {
+      try {
+        chrome.runtime.sendMessage({ type: 'session-current' }, (r) => res(r));
+      } catch (e) { res(null); }
+    });
+    const tabId = tab?.tabId;
+
+    const r = await send({ type: 'session-snapshot', tabId, host });
+
+    if (btn) { btn.disabled = false; btn.textContent = '存本站'; }
+
+    if (!r?.ok) return setStatus('保存失败：' + (r?.error || '未知'), 'err');
+
+    await reload();
+    renderList();
+    const s = r.snap?.summary || {};
+    const bits = [`${s.cookies || 0} cookie`];
+    if (s.httpOnly) bits.push(`${s.httpOnly} HttpOnly`);
+    if (s.local) bits.push(`${s.local} 本地项`);
+    if (s.session) bits.push(`${s.session} 会话项`);
+    setStatus(`${host} 已保存 · ${bits.join(' · ')}`, 'ok');
+  }
+
+  async function restoreSession(host) {
+    const target = host || location.hostname;
+    if (!state.sessions[target]) return setStatus(`${target} 还没有快照`, 'err');
+
+    const same = target === location.hostname;
+    const tip = same
+      ? `用快照覆盖 ${target} 当前的登录态？页面会刷新一次。`
+      : `${target} 不在当前页，会跳过去再恢复。继续？`;
+    if (!confirm(tip)) return;
+
+    const tab = await new Promise((res) => {
+      try {
+        chrome.runtime.sendMessage({ type: 'session-current' }, (r) => res(r));
+      } catch (e) { res(null); }
+    });
+
+    const r = await send({ type: 'session-restore', tabId: tab?.tabId, host: target });
+    if (!r?.ok) return setStatus('恢复失败：' + (r?.error || '未知'), 'err');
+
+    const bits = [`${r.cookies || 0} cookie`];
+    if (r.storage) bits.push(`${r.storage} 项 storage`);
+    if (r.cookieFailed?.length) bits.push(`${r.cookieFailed.length} 条被拒`);
+    setStatus(`${target} 已写回 · ${bits.join(' · ')}`, 'ok');
+  }
+
+  async function exportSessions() {
+    const r = await send({ type: 'session-export' });
+    if (!r?.ok) return setStatus('导出失败', 'err');
+
+    const n = Object.keys(r.data?.sessions || {}).length;
+    if (!n) return setStatus('没有会话快照可导出', 'err');
+
+    const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `sessions-${todayStamp()}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+    setStatus(`已导出 ${n} 个站点的会话`, 'ok');
+  }
+
+  function importSessions() {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json';
+    inp.addEventListener('change', async () => {
+      const file = inp.files?.[0];
+      if (!file) return;
+      if (file.size > 8 * 1024 * 1024) return setStatus('文件太大（上限 8MB）', 'err');
+      try {
+        const data = JSON.parse(await file.text());
+        const r = await send({ type: 'session-import', data });
+        if (!r?.ok) return setStatus('导入失败：' + (r?.error || '未知'), 'err');
+        await reload();
+        renderList();
+        setStatus(`已导入：新增 ${r.added}，更新 ${r.updated}`, 'ok');
+      } catch (e) {
+        setStatus('不是合法 JSON：' + e.message, 'err');
+      }
+    });
+    inp.click();
   }
 
   function renderBulk() {
@@ -883,6 +1039,10 @@
     else if (act === 'bulktoggle') doBulkToggle();
     else if (act === 'bulkremove') doBulkRemove();
     else if (act === 'addall') doAddAll(btn);
+    else if (act === 'sesssave') saveSession();
+    else if (act === 'sessrestore') restoreSession('');
+    else if (act === 'sessexport') exportSessions();
+    else if (act === 'sessimport') importSessions();
   }
 
   function onPlatformChange() {
@@ -1260,6 +1420,8 @@
       state.platforms = res.platforms || [];
       state.settings = res.settings || {};
     }
+    const se = await send({ type: 'session-list' });
+    if (se?.ok) state.sessions = se.sessions || {};
     renderList();
   }
 
@@ -1282,6 +1444,9 @@
     state.captured = res.captured || [];
     state.platforms = res.platforms || [];
     state.settings = res.settings || {};
+
+    const se = await send({ type: 'session-list' });
+    if (se?.ok) state.sessions = se.sessions || {};
 
     if (state.settings.sortMode) state.sortMode = state.settings.sortMode;
     if (state.settings.filterStatus) state.filterStatus = state.settings.filterStatus;

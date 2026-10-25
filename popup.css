@@ -259,15 +259,16 @@ select:focus { border-color: var(--accent); }
   border: 0;
   background: transparent;
   color: var(--text-mute);
-  font-size: 11px;
+  font-size: 10.5px;
   font-family: inherit;
-  padding: 3px 9px;
+  padding: 3px 7px;
   border-radius: 5px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   transition: background .13s, color .13s;
+  white-space: nowrap;
 }
 .seg:hover { color: var(--text-dim); }
 .seg.active { background: var(--surface-2); color: var(--text); }
@@ -431,6 +432,38 @@ select:focus { border-color: var(--accent); }
   padding-top: 8px;
   border-top: 1px solid var(--border);
 }
+/* .foot 的 display:flex 会盖掉 hidden 属性自带的 display:none，得显式写一条 */
+.foot[hidden] { display: none; }
+
+.sess-tip { font-size: 9.5px; color: #4a5261; }
+.item.sess.current { background: #121c28; }
+.avatar.sess { background: linear-gradient(135deg, #475569, #334155); }
+.avatar.sess.auth { background: linear-gradient(135deg, #34d399, #059669); color: #062018; }
+.cur-tag {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #1e3a5f;
+  color: #93c5fd;
+  font-size: 9px;
+  font-weight: 500;
+  vertical-align: 1px;
+}
+.icon-mini {
+  border: 0;
+  background: transparent;
+  color: #3d4453;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  flex: none;
+  transition: color .13s, background .13s;
+}
+.item:hover .icon-mini { color: #7b8497; }
+.icon-mini:hover { color: var(--bad); background: #221318; }
+.icon-mini svg { width: 12px; height: 12px; }
 
 .foot-extra { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 10.5px; white-space: nowrap; overflow: hidden; }
 .check-inline { display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-mute); flex: none; }

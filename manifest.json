@@ -2,15 +2,17 @@
   "manifest_version": 3,
   "name": "通用凭证导出器",
   "author": "Faynt",
-  "version": "5.0.0",
-  "description": "导出网页登录凭证：支持设备码授权流程，也能在任意站点抓取页面出现过的 token / cookie。",
+  "version": "6.1.0",
+  "description": "导出并恢复网页登录态：整包保存 cookie 与 storage，也能在任意站点抓取出现过的 token。",
   "permissions": [
     "storage",
     "cookies",
     "tabs",
     "clipboardWrite",
     "webRequest",
-    "contextMenus"
+    "contextMenus",
+    "alarms",
+    "scripting"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {

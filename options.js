@@ -12,6 +12,8 @@ async function load() {
 
   $('opt-panel').checked = !!settings.showFloatingPanel;
   $('opt-autorefresh').checked = settings.autoRefresh !== false;
+  $('opt-autosnapshot').checked = settings.autoSnapshot !== false;
+  $('opt-autorestore').checked = settings.autoRestore !== false;
   $('count').textContent = (pool || []).length;
   $('custom-json').value = custom && custom.length ? JSON.stringify(custom, null, 2) : '';
 
@@ -80,6 +82,34 @@ $('opt-panel').addEventListener('change', async (e) => {
 
 $('opt-autorefresh').addEventListener('change', async (e) => {
   await send({ type: 'save-settings', settings: { autoRefresh: e.target.checked } });
+});
+
+// 两个开关共用一条状态行，各自起定时器会互相清掉：先点的那个 4 秒后
+// 把后点的那条提示抹了。统一走一个定时器，每次先清旧的。
+let snapTimer = 0;
+function snapMsg(text) {
+  const el = $('snap-msg');
+  if (!el) return;
+  el.className = 'msg ok';
+  el.textContent = text;
+  clearTimeout(snapTimer);
+  snapTimer = setTimeout(() => { el.textContent = ''; }, 4000);
+}
+
+$('opt-autosnapshot').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  await send({ type: 'save-settings', settings: { autoSnapshot: on } });
+  snapMsg(on
+    ? '已开启。之后打开站点会自动存快照，已有的快照不受影响。'
+    : '已关闭。只能手动在「会话」页签点「存本站」。');
+});
+
+$('opt-autorestore').addEventListener('change', async (e) => {
+  const on = e.target.checked;
+  await send({ type: 'save-settings', settings: { autoRestore: on } });
+  snapMsg(on
+    ? '已开启。掉登录后打开站点会自动写回快照。'
+    : '已关闭。掉登录后需要手动在「会话」页签点「恢复」。');
 });
 
 /* 抓取范围（白名单） */

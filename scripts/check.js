@@ -169,11 +169,13 @@ if (STRICT) {
 
   const needPerm = {
     storage: '存凭证',
-    cookies: '读 HttpOnly cookie',
+    cookies: '读写 cookie（快照要能写回）',
     tabs: '查当前标签、开授权页',
     clipboardWrite: '写剪贴板',
     webRequest: '读请求头',
     contextMenus: '右键菜单',
+    alarms: '定时续期与恢复排队',
+    scripting: '页面没有内容脚本时兜底读写 storage',
   };
   const allJs = jsFiles.map(read).join('\n');
 

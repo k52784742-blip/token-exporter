@@ -10,6 +10,7 @@ const $ = (id) => document.getElementById(id);
 const state = {
   pool: [],
   captured: [],
+  sessions: {},
   platforms: PRESETS.slice(),
   settings: {},
   stats: null,
@@ -107,6 +108,9 @@ async function refreshAll() {
   }
   const st = await send({ type: 'stats' });
   if (st?.ok) state.stats = st.stats;
+
+  const se = await send({ type: 'session-list' });
+  if (se?.ok) state.sessions = se.sessions || {};
 }
 
 
@@ -172,7 +176,18 @@ function renderStats() {
 function renderCounts() {
   $('pool-count').textContent = state.pool.length;
   $('cap-count').textContent = state.captured.length;
-  $('list-title').textContent = state.tabView === 'pool' ? '凭证池' : '本页扫到的';
+  const sn = $('sess-count');
+  if (sn) sn.textContent = Object.keys(state.sessions || {}).length;
+  $('list-title').textContent = state.tabView === 'pool' ? '凭证池'
+    : state.tabView === 'session' ? '会话快照'
+    : '本页扫到的';
+
+  // 会话页签用自己的一套底栏，别和凭证操作的按钮混在一起
+  const isSess = state.tabView === 'session';
+  const foot = document.querySelector('.foot');
+  const sessFoot = $('sess-foot');
+  if (foot) foot.hidden = isSess;
+  if (sessFoot) sessFoot.hidden = !isSess;
 
   document.querySelectorAll('.seg').forEach((t) => {
     t.classList.toggle('active', t.dataset.tab === state.tabView);
@@ -183,6 +198,7 @@ function renderList() {
   renderCounts();
   renderStats();
   if (state.tabView === 'captured') return renderCaptured();
+  if (state.tabView === 'session') return renderSessions();
   return renderPool();
 }
 
@@ -357,8 +373,78 @@ function renderCaptured() {
 }
 
 
-function toggleSelect(key) {
-  if (state.selected.has(key)) state.selected.delete(key);
+function renderSessions() {
+  const el = $('list');
+  const now = Date.now();
+  const map = state.sessions || {};
+  const hosts = Object.keys(map).sort((a, b) => (map[b]?.at || 0) - (map[a]?.at || 0));
+  const cur = state.tab?.url ? safeHost(state.tab.url) : '';
+
+  if (!hosts.length) {
+    el.innerHTML = emptyBox('还没有会话快照<br>登录好一个站点，切到「会话」再点「存本站」');
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="captured-head">
+      <span>共 ${hosts.length} 个站点</span>
+      <span class="sess-tip">快照含 cookie 与 storage</span>
+    </div>`
+    + hosts.map((h) => {
+    const s = map[h] || {};
+    const sm = s.summary || {};
+    const isCur = h === cur;
+    const bits = [];
+    if (sm.cookies) bits.push(`${sm.cookies} cookie`);
+    if (sm.httpOnly) bits.push(`${sm.httpOnly} HttpOnly`);
+    if (sm.local) bits.push(`${sm.local} 本地项`);
+    if (sm.session) bits.push(`${sm.session} 会话项`);
+    // 自动恢复试满 3 次还是没成，说明快照本身过期了，得让用户知道别再等
+    if ((s.restoreTries || 0) >= 3) bits.push('已失效，需重新登录后存一份');
+
+    return `
+      <div class="item sess${isCur ? ' current' : ''}" data-host="${escapeHtmlSafe(h)}">
+        <div class="avatar sess${sm.authLike ? ' auth' : ''}">${sm.authLike ? '✓' : '·'}</div>
+        <div class="meta">
+          <div class="name">${highlight(h)}${isCur ? ' <span class="cur-tag">当前</span>' : ''}</div>
+          <div class="sub">${escapeHtmlSafe(bits.join(' · ') || '空快照')}</div>
+        </div>
+        <span class="src-tag">${escapeHtmlSafe(timeAgo(s.at, now))}</span>
+        <button class="btn small" data-srestore="${escapeHtmlSafe(h)}">恢复</button>
+        <button class="icon-mini" data-sdel="${escapeHtmlSafe(h)}" title="删除">${ICON.x}</button>
+      </div>`;
+  }).join('');
+
+  // 顺手告诉用户自动保存有没有开着，不然会以为没生效
+  const hint = el.querySelector('.sess-tip');
+  if (hint && state.settings?.autoSnapshot === false) {
+    hint.textContent = '自动保存已关 · 只能手动存';
+    hint.style.color = 'var(--warn, #f59e0b)';
+  }
+
+  el.querySelectorAll('[data-srestore]').forEach((b) => {
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); restoreSessionByHost(b.dataset.srestore); });
+  });
+  el.querySelectorAll('[data-sdel]').forEach((b) => {
+    b.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const h = b.dataset.sdel;
+      if (!confirm(`删除 ${h} 的会话快照？`)) return;
+      const r = await send({ type: 'session-remove', host: h });
+      if (r?.ok) {
+        state.sessions = r.sessions || {};
+        renderList();
+        setStatus('已删除', 'ok');
+      }
+    });
+  });
+  el.querySelectorAll('.item').forEach((it) => {
+    it.addEventListener('click', () => restoreSessionByHost(it.dataset.host));
+  });
+}
+
+
+function toggleSelect(key) {  if (state.selected.has(key)) state.selected.delete(key);
   else state.selected.add(key);
   renderList();
 }
@@ -975,8 +1061,102 @@ async function confirmImport() {
 }
 
 
-function bind() {
-  $('platform').addEventListener('change', (e) => {
+/* ---------------- 会话快照 ---------------- */
+
+async function saveSessionHere() {
+  const btn = $('btn-sess-save');
+  const host = state.tab?.url ? safeHost(state.tab.url) : '';
+  if (!host) return setStatus('当前页面拿不到域名', 'err');
+
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '保存中…';
+
+  const r = await send({ type: 'session-snapshot', tabId: state.tab.id, host });
+
+  btn.disabled = false;
+  btn.textContent = old;
+
+  if (!r?.ok) return setStatus('保存失败：' + (r?.error || '未知'), 'err');
+
+  state.sessions = (await send({ type: 'session-list' }))?.sessions || state.sessions;
+  renderList();
+
+  const s = r.snap?.summary || {};
+  const bits = [`${s.cookies || 0} cookie`];
+  if (s.httpOnly) bits.push(`${s.httpOnly} HttpOnly`);
+  if (s.local) bits.push(`${s.local} 本地项`);
+  if (s.session) bits.push(`${s.session} 会话项`);
+  setStatus(`${host} 已保存 · ${bits.join(' · ')}`, 'ok');
+}
+
+async function restoreSessionByHost(host) {
+  const target = host || (state.tab?.url ? safeHost(state.tab.url) : '');
+  if (!target) return setStatus('当前页面拿不到域名', 'err');
+  if (!state.sessions[target]) return setStatus(`${target} 还没有快照`, 'err');
+
+  const same = state.tab?.url && safeHost(state.tab.url) === target;
+  const tip = same
+    ? `用快照覆盖 ${target} 当前的登录态？页面会刷新一次。`
+    : `${target} 不在当前标签页，会跳过去再恢复。继续？`;
+  if (!confirm(tip)) return;
+
+  const btn = $('btn-sess-restore');
+  if (btn) { btn.disabled = true; btn.textContent = '恢复中…'; }
+
+  const r = await send({ type: 'session-restore', tabId: state.tab.id, host: target });
+
+  if (btn) { btn.disabled = false; btn.textContent = '恢复本站'; }
+
+  if (!r?.ok) return setStatus('恢复失败：' + (r?.error || '未知'), 'err');
+
+  const bits = [`${r.cookies || 0} cookie`];
+  if (r.storage) bits.push(`${r.storage} 项 storage`);
+  if (r.cookieFailed?.length) bits.push(`${r.cookieFailed.length} 条被拒`);
+
+  setStatus(`${target} 已写回 · ${bits.join(' · ')}，页面正在刷新`, 'ok');
+  // 刷新会关掉 popup，不用等
+}
+
+async function exportSessions() {
+  const r = await send({ type: 'session-export' });
+  if (!r?.ok) return setStatus('导出失败', 'err');
+
+  const n = Object.keys(r.data?.sessions || {}).length;
+  if (!n) return setStatus('没有会话快照可导出', 'err');
+
+  const blob = new Blob([JSON.stringify(r.data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sessions-${todayStamp()}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+
+  setStatus(`已导出 ${n} 个站点的会话`, 'ok');
+}
+
+async function onSessionFile(ev) {
+  const file = ev.target.files?.[0];
+  ev.target.value = '';
+  if (!file) return;
+  if (file.size > 8 * 1024 * 1024) return setStatus('文件太大（上限 8MB）', 'err');
+
+  try {
+    const data = JSON.parse(await file.text());
+    const r = await send({ type: 'session-import', data });
+    if (!r?.ok) return setStatus('导入失败：' + (r?.error || '未知'), 'err');
+
+    state.sessions = (await send({ type: 'session-list' }))?.sessions || {};
+    renderList();
+    setStatus(`已导入：新增 ${r.added}，更新 ${r.updated}`, 'ok');
+  } catch (e) {
+    setStatus('文件不是合法 JSON：' + e.message, 'err');
+  }
+}
+
+
+function bind() {  $('platform').addEventListener('change', (e) => {
     const id = e.target.value;
     state.activePlatform = state.platforms.find((p) => p.id === id)
       || sitePlatform(state.tab?.url ? safeHost(state.tab.url) : '');
@@ -1124,6 +1304,13 @@ function bind() {
   $('btn-clean-garbage').addEventListener('click', cleanGarbage);
   $('btn-check-all').addEventListener('click', checkAll);
   $('btn-site-toggle').addEventListener('click', toggleSiteRule);
+
+  // 会话快照
+  $('btn-sess-save').addEventListener('click', saveSessionHere);
+  $('btn-sess-restore').addEventListener('click', () => restoreSessionByHost(''));
+  $('btn-sess-export').addEventListener('click', exportSessions);
+  $('btn-sess-import').addEventListener('click', () => $('sess-file').click());
+  $('sess-file').addEventListener('change', onSessionFile);
 
   // 弹窗
   $('modal-cancel').addEventListener('click', () => { $('modal').hidden = true; });

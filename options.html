@@ -32,6 +32,25 @@
     </section>
 
     <section>
+      <h2>登录态</h2>
+      <label class="check">
+        <input type="checkbox" id="opt-autosnapshot">
+        <span>
+          <strong>自动保存会话快照</strong>
+          <em>页面加载完顺手存一份 cookie 和 storage。登出、被踢时不会覆盖已有的快照，所以掉登录还能一键恢复。</em>
+        </span>
+      </label>
+      <label class="check">
+        <input type="checkbox" id="opt-autorestore">
+        <span>
+          <strong>掉登录时自动恢复</strong>
+          <em>打开站点发现没登录了，就用最近一次快照写回去并刷新。同一站点最多连续试 3 次，之后不再打扰。</em>
+        </span>
+      </label>
+      <p class="msg" id="snap-msg"></p>
+    </section>
+
+    <section>
       <h2>凭证池</h2>
       <p class="desc">当前共 <strong id="count">0</strong> 条凭证。凭证明文存放在扩展本地存储中。</p>
       <div class="row">

@@ -8,6 +8,11 @@ import {
   buildDeviceRow, buildGenericRow, normalizeImport, rowKey,
   toDeviceExport, toGenericExport,
 } from './utils.js';
+import {
+  hostOf, listSessions, snapshotSession, restoreSession, resumePending,
+  removeSession, clearSessions, exportSessions, importSessions,
+  autoSnapshot, maybeAutoRestore,
+} from './session.js';
 
 const K = {
   pool: 'accounts_v1',
@@ -38,7 +43,7 @@ async function getSettings() {
   return {
     showFloatingPanel: false, autoRefresh: true, sortMode: 'urgency',
     lastPlatform: '', exportFormat: 'auto', filterStatus: 'all',
-    captureAll: true, allowHosts: [], ...(s || {}),
+    captureAll: true, allowHosts: [], autoSnapshot: true, autoRestore: true, ...(s || {}),
   };
 }
 
@@ -850,6 +855,62 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           break;
         }
 
+        /* ---------- 会话快照 ---------- */
+
+        case 'session-list': {
+          sendResponse({ ok: true, sessions: await listSessions() });
+          break;
+        }
+
+        case 'session-snapshot': {
+          const tabId = msg.tabId || sender.tab?.id;
+          if (!tabId) return sendResponse({ ok: false, error: '拿不到标签页' });
+          const host = msg.host || hostOf(sender.tab?.url || '');
+          const r = await snapshotSession(host, tabId);
+          sendResponse(r);
+          break;
+        }
+
+        case 'session-restore': {
+          const tabId = msg.tabId || sender.tab?.id;
+          if (!tabId) return sendResponse({ ok: false, error: '拿不到标签页' });
+          const host = msg.host || hostOf(sender.tab?.url || '');
+          sendResponse(await restoreSession(host, tabId));
+          break;
+        }
+
+        case 'session-remove': {
+          sendResponse({ ok: true, sessions: await removeSession(msg.host) });
+          break;
+        }
+
+        case 'session-clear': {
+          sendResponse({ ok: true, sessions: await clearSessions() });
+          break;
+        }
+
+        case 'session-export': {
+          sendResponse({ ok: true, data: await exportSessions(msg.hosts) });
+          break;
+        }
+
+        case 'session-import': {
+          sendResponse(await importSessions(msg.data, { replace: !!msg.replace }));
+          break;
+        }
+
+        case 'session-current': {
+          // 当前标签页有没有快照，popup 打开时要立刻知道
+          const tabId = msg.tabId || sender.tab?.id;
+          const tab = tabId ? await chrome.tabs.get(tabId).catch(() => null) : null;
+          const host = msg.host || hostOf(tab?.url || '');
+          const map = await listSessions();
+          sendResponse({
+            ok: true, host, tabId: tabId || null, has: !!map[host], snap: map[host] || null,
+          });
+          break;
+        }
+
         default:
           sendResponse({ ok: false, error: 'unknown message: ' + msg?.type });
       }
@@ -899,16 +960,71 @@ chrome.runtime.onInstalled.addListener(async () => {
   buildMenus();
   const cur = await getSettings();
   await chrome.storage.local.set({ [K.settings]: { showFloatingPanel: false, autoRefresh: true, ...cur } });
+  setupAlarms().catch(() => {});
 });
 
 chrome.runtime.onStartup.addListener(() => {
   buildMenus();
+  setupAlarms().catch(() => {});
   maybeAutoRefresh().catch(() => {});
   updateBadge().catch(() => {});
 });
+
+// 只在这里跑一次的话，SW 一被杀就再也不会有下次了。
+// 真正的周期任务必须挂在 alarms 上，由浏览器叫醒。
+setupAlarms().catch(() => {});
 maybeAutoRefresh().catch(() => {});
 
-// 12 小时最多跑一次，免得频繁刷新把号刷进风控
+const ALARM_TICK = 'tk-tick';
+
+async function setupAlarms() {
+  try {
+    const existing = await chrome.alarms.get(ALARM_TICK);
+    if (existing) return;
+    // 30 分钟一次。SW 被杀掉也不影响，到点浏览器会把它拉起来。
+    await chrome.alarms.create(ALARM_TICK, { periodInMinutes: 30, delayInMinutes: 1 });
+  } catch (e) {}
+}
+
+try {
+  chrome.alarms.onAlarm.addListener((a) => {
+    if (a.name !== ALARM_TICK) return;
+    maybeAutoRefresh().catch(() => {});
+    updateBadge().catch(() => {});
+  });
+} catch (e) {}
+
+// 页面加载完做两件事：补写排队中的 storage；顺手自动存一份会话快照
+try {
+  chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+    if (info.status !== 'complete' || !tab?.url) return;
+    if (info.frameId) return; // 只认主框架，iframe 也会触发这个事件
+    resumePending(tabId, tab.url).catch(() => {});
+    maybeAutoSnapshot(tabId, tab.url).catch(() => {});
+  });
+} catch (e) {}
+
+async function maybeAutoSnapshot(tabId, url) {
+  const settings = await getSettings();
+  if (settings.autoSnapshot === false) return;
+  const host = hostOf(url);
+  if (!host) return;
+  // 内网、本机、浏览器内部页都不算登录态，别浪费存储
+  if (!/\./.test(host) || /^(localhost|\d+\.\d+\.\d+\.\d+)$/.test(host)) return;
+  const rules = await getSiteRules();
+  if (rules[host]?.snapshot === false) return;
+
+  // 先看能不能自动救回来。救回来会刷新页面，这时不要再存快照，
+  // 否则刚写回的东西可能被页面初始化过程中的中间态覆盖掉
+  if (settings.autoRestore !== false) {
+    const r = await maybeAutoRestore(host, tabId).catch(() => null);
+    if (r?.ok && (r.reloading || r.navigating)) return;
+  }
+
+  await autoSnapshot(host, tabId).catch(() => {});
+}
+
+// 12 小时最多续一次，免得频繁刷新把号刷进风控
 async function maybeAutoRefresh() {
   const settings = await getSettings();
   if (!settings.autoRefresh) return;
@@ -923,4 +1039,5 @@ async function maybeAutoRefresh() {
   for (const row of targets) {
     await deviceRefresh(row).catch(() => {});
   }
+  updateBadge().catch(() => {});
 }

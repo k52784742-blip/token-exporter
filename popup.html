@@ -93,6 +93,9 @@
           <button class="seg" data-tab="captured">
             扫到 <span class="count" id="cap-count">0</span>
           </button>
+          <button class="seg" data-tab="session">
+            会话 <span class="count" id="sess-count">0</span>
+          </button>
         </span>
       </div>
 
@@ -134,6 +137,24 @@
           </svg>
           清空
         </button>
+      </div>
+
+      <!-- 会话快照的专属操作条，只在「会话」页签出现 -->
+      <div class="foot sess-foot" id="sess-foot" hidden>
+        <button class="btn primary" id="btn-sess-save">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M5 4h11l3 3v13H5z"></path><path d="M8 4v6h8V4M8 20v-6h8v6"></path>
+          </svg>
+          存本站
+        </button>
+        <button class="btn" id="btn-sess-restore">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M4 12a8 8 0 1116 0M4 12h5M4 12l3-3M4 12l3 3"></path>
+          </svg>
+          恢复本站
+        </button>
+        <button class="btn" id="btn-sess-export">导出</button>
+        <button class="btn" id="btn-sess-import">导入</button>
       </div>
 
       <div class="foot-extra">
@@ -199,6 +220,7 @@
   </div>
 
   <input type="file" id="restore-file" accept=".json" hidden>
+  <input type="file" id="sess-file" accept=".json" hidden>
   <script type="module" src="popup.js"></script>
 </body>
 </html>
