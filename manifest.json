@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "通用凭证导出器",
   "author": "Faynt",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "description": "已知平台走官方授权流程导出完整 token；任意站点可抓取页面 token / cookie 并导出。",
   "permissions": [
     "storage",

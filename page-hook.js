@@ -117,6 +117,28 @@
     }
   }
 
+  // 有些站点（DeepSeek 之类）把 token 包在 {"value":"<jwt>","__version":"0"} 里。
+  // 这种包装层很常见（zustand persist / pinia 持久化），单独处理一下，
+  // 免得导出时把整个 JSON 当成 token。
+  const WRAPPER_KEYS = ['value', 'v', 'data', 'token', 'access_token', 'accessToken', 'jwt', 'content', 'val'];
+
+  function unwrapValue(str) {
+    if (!str || str.length < 16 || str.length > 100000) return null;
+    const t = str.trim();
+    if (t[0] !== '{') return null;
+    let obj;
+    try { obj = JSON.parse(t); } catch (e) { return null; }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+
+    for (const k of WRAPPER_KEYS) {
+      const v = obj[k];
+      if (typeof v === 'string' && v.length >= 16 && (looksJwt(v) || /^[A-Za-z0-9_\-.]{20,}$/.test(v))) {
+        return v;
+      }
+    }
+    return null;
+  }
+
   function scanHeaders(headers, url) {
     if (!headers) return;
     try {
@@ -239,7 +261,18 @@
       //    所以下面所有包装函数都写成箭头函数（天生没有 prototype），
       //    这里只是兜一层：万一还是普通函数，尽量把它抹掉。
       if (!Object.prototype.hasOwnProperty.call(original, 'prototype')) {
-        try { delete fn.prototype; } catch (e) {}
+        try {
+          delete fn.prototype;
+        } catch (e) {}
+        // delete 不掉就重定义成不可枚举、值为 undefined，
+        // 这样 hasOwnProperty('prototype') 仍然是 true —— 但至少不能当构造器用。
+        if (Object.prototype.hasOwnProperty.call(fn, 'prototype')) {
+          try {
+            Object.defineProperty(fn, 'prototype', {
+              value: undefined, writable: false, configurable: true, enumerable: false,
+            });
+          } catch (e) {}
+        }
       }
 
       // 2) toString 不能是自有属性。原生函数的 toString 继承自 Function.prototype，
@@ -513,12 +546,29 @@
           if (!v || v.length < 16) continue;
 
           const lk = String(k).toLowerCase();
+
+          // 先看是不是 JSON。很多应用（DeepSeek、各种 zustand/pinia 持久化）
+          // 存的是 {"value":"<token>","__version":"0"} 这种包装对象。
+          // 如果先按 key 名匹配，会把整串 JSON 当成 token 交上去，
+          // 后面导出就全废了。所以 JSON 一定要先拆。
+          if (v[0] === '{' || v[0] === '[') {
+            // 先试包装层
+            const inner = unwrapValue(v);
+            if (inner) {
+              post(inner, label + ':' + k, location.hostname, true);
+              continue;
+            }
+
+            let parsed = null;
+            try { parsed = JSON.parse(v); } catch (e) {}
+            if (parsed && typeof parsed === 'object') {
+              if (v.length < 2_000_000) scanJson(parsed, label + ':' + k, 0);
+              continue;
+            }
+          }
+
           if (looksJwt(v)) { post(v, label + ':' + k, location.hostname); continue; }
           if (keyIsTokenKey(lk)) { post(v, label + ':' + k, location.hostname, keyIsStrong(lk)); continue; }
-
-          if ((v[0] === '{' || v[0] === '[') && v.length < 2_000_000) {
-            try { scanJson(JSON.parse(v), label + ':' + k, 0); } catch (e) {}
-          }
         }
       } catch (e) {}
     };
@@ -592,4 +642,48 @@
 
   // SPA 常常异步写 token，晚一点补一次
   setTimeout(scanStorage, 3500);
+  setTimeout(scanStorage, 9000);
+
+  // 登录后 token 才写进 storage 的情况很常见（DeepSeek 就是）。
+  // 光靠定时扫会漏，所以监听 storage 变化。
+  // storage 事件只在「其他同源窗口」触发，本窗口改自己不会触发 —— 所以还要
+  // 在 Storage.prototype.setItem 上挂一层，捕获本窗口的写入。
+  window.addEventListener('storage', () => {
+    if (disabled) return;
+    setTimeout(scanStorage, 60);
+  }, { passive: true });
+
+  try {
+    const origSetItem = Storage.prototype.setItem;
+
+    // 普通函数的 prototype 是不可配置的，delete / defineProperty 都抹不掉，
+    // 一测就露。所以用箭头函数（天生没有 prototype）。
+    //
+    // 箭头函数没有自己的 this，但 Proxy 可以保留调用者：用 apply 陷阱拿到
+    // thisArg，再原样转发给原生方法。这样 localStorage 和 sessionStorage
+    // 都能正确写入自己的存储。
+    const handler = {
+      apply(target, thisArg, args) {
+        const r = Reflect.apply(origSetItem, thisArg, args);
+        if (!disabled) {
+          const lk = String(args[0] || '').toLowerCase();
+          const v = args[1];
+          if (keyIsTokenKey(lk) || (typeof v === 'string' && v.length >= 16 && v.includes('.'))) {
+            setTimeout(scanStorage, 80);
+          }
+        }
+        return r;
+      },
+    };
+
+    // Proxy 的 target 用箭头函数，这样 getOwnPropertyDescriptor('prototype')
+    // 查不到 —— 和原生一致。Proxy 会把这个「没有 prototype」如实反映出来。
+    const proxy = new Proxy((..._args) => {}, handler);
+    disguise(proxy, origSetItem, 'setItem');
+    Storage.prototype.setItem = proxy;
+
+    originals.push(() => {
+      try { Storage.prototype.setItem = origSetItem; } catch (e) {}
+    });
+  } catch (e) {}
 })();
