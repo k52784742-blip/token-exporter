@@ -303,7 +303,13 @@
     .bulk-count { flex: 1; font-size: 10px; color: #93c5fd; }
     .foot { display: flex; gap: 5px; margin-top: 7px; padding-top: 7px;
       border-top: 1px solid #2a2f3a; }
+    .foot[hidden] { display: none; }
     .foot-extra { display: flex; align-items: center; gap: 5px; margin-top: 6px; }
+    .foot-extra.links { gap: 3px; margin-top: 3px; flex-wrap: nowrap; }
+    .check-inline { display: flex; align-items: center; gap: 3px; flex: none;
+      font-size: 9.5px; color: #7b8497; cursor: pointer; white-space: nowrap; }
+    .check-inline input { margin: 0; width: 11px; height: 11px;
+      accent-color: #3b82f6; cursor: pointer; }
     .hint { margin-top: 6px; font-size: 9.5px; color: #5f6779; line-height: 1.45; }
     .link-btn { border: 0; background: transparent; color: #5f6779;
       font-size: 9.5px; font-family: inherit; cursor: pointer; padding: 2px 3px;
@@ -452,6 +458,7 @@
           <button class="btn" data-act="sessrestore">恢复本站</button>
           <button class="btn" data-act="sessexport">导出</button>
           <button class="btn" data-act="sessimport">导入</button>
+          <button class="btn" data-act="sessclear" title="删掉所有站点的登录态快照">清空</button>
         </div>
         <div class="foot-extra">
           <select data-el="format" style="flex:1;font-size:10px;padding:3px 5px">
@@ -464,7 +471,14 @@
             <option value="env">.env</option>
             <option value="postman">Postman</option>
           </select>
+          <label class="check-inline"><input type="checkbox" data-el="onlyvalid">跳过过期</label>
+        </div>
+        <div class="foot-extra links">
           <button class="link-btn" data-act="checkall">体检</button>
+          <button class="link-btn" data-act="backup">备份</button>
+          <button class="link-btn" data-act="restore">恢复</button>
+          <button class="link-btn" data-act="cleanexpired">清过期</button>
+          <button class="link-btn" data-act="cleangarbage">清无效</button>
           <button class="link-btn" data-act="site">本站</button>
           <button class="link-btn" data-act="settings">设置</button>
         </div>
@@ -488,6 +502,7 @@
     els.capCount = panel.querySelector('[data-el="capcount"]');
     els.sessCount = panel.querySelector('[data-el="sesscount"]');
     els.sessFoot = panel.querySelector('[data-el="sessfoot"]');
+    els.onlyValid = panel.querySelector('[data-el="onlyvalid"]');
     els.list = panel.querySelector('[data-el="list"]');
     els.bulkbar = panel.querySelector('[data-el="bulkbar"]');
     els.bulkCount = panel.querySelector('[data-el="bulkcount"]');
@@ -557,8 +572,10 @@
     let expired = 0;
     let soon = 0;
     let disabled = 0;
+    let withRefresh = 0;
     for (const r of pool) {
       if (r.enabled === false) { disabled++; continue; }
+      if (r.refresh_token) withRefresh++;
       const left = (r.expiresAt || 0) - now;
       if (r.expiresAt && left <= 0) expired++;
       else if (r.expiresAt && left < 3 * 86400000) soon++;
@@ -567,6 +584,7 @@
     const parts = [`<span class="stat-item"><b>${pool.length}</b> 个</span>`];
     if (expired) parts.push(`<span class="stat-item bad"><b>${expired}</b> 过期</span>`);
     if (soon) parts.push(`<span class="stat-item warn"><b>${soon}</b> 将到期</span>`);
+    if (withRefresh) parts.push(`<span class="stat-item"><b>${withRefresh}</b> 可续期</span>`);
     if (disabled) parts.push(`<span class="stat-item"><b>${disabled}</b> 停用</span>`);
 
     els.stats.innerHTML = parts.join('<span class="stat-sep"></span>');
@@ -1197,6 +1215,11 @@
     else if (act === 'sessrestore') restoreSession('');
     else if (act === 'sessexport') exportSessions();
     else if (act === 'sessimport') importSessions();
+    else if (act === 'sessclear') doSessionClear();
+    else if (act === 'backup') doBackup();
+    else if (act === 'restore') doRestore();
+    else if (act === 'cleanexpired') doRemoveExpired();
+    else if (act === 'cleangarbage') doCleanGarbage();
   }
 
   function onPlatformChange() {
@@ -1300,7 +1323,7 @@
   function exportPayload() {
     const fmt = els.format?.value || 'auto';
     const picked = pickedRows();
-    const payload = { type: 'export', format: fmt, onlyValid: false };
+    const payload = { type: 'export', format: fmt, onlyValid: !!els.onlyValid?.checked };
     if (picked) payload.keys = picked.map(rowKey);
     return payload;
   }
@@ -1418,6 +1441,81 @@
     } else {
       setStatus('续期失败', 'err');
     }
+  }
+
+  async function doBackup() {
+    const r = await send({ type: 'backup' });
+    if (!r?.ok) return setStatus('备份失败', 'err');
+
+    const text = JSON.stringify(r.data, null, 2);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `token-backup-${todayStamp()}.json`;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setStatus(`已备份 ${(r.data?.accounts || []).length} 个凭证`, 'ok');
+  }
+
+  function doRestore() {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json,application/json';
+    inp.addEventListener('change', async () => {
+      const file = inp.files?.[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) return setStatus('文件太大（上限 5MB）', 'err');
+      try {
+        const data = JSON.parse(await file.text());
+        const r = await send({ type: 'restore', data });
+        if (!r?.ok) return setStatus('恢复失败：' + (r?.error || '未知'), 'err');
+        await reload();
+        setStatus(`恢复完成：新增 ${r.added}，更新 ${r.updated}`, 'ok');
+      } catch (e) {
+        setStatus('不是合法 JSON：' + e.message, 'err');
+      }
+    });
+    inp.click();
+  }
+
+  async function doRemoveExpired() {
+    const now = Date.now();
+    const n = state.pool.filter((r) => r.expiresAt && r.expiresAt <= now).length;
+    if (!n) return setStatus('没有过期的');
+    if (!confirm(`确定移除 ${n} 个已过期的凭证？`)) return;
+
+    const r = await send({ type: 'remove-expired' });
+    if (!r?.ok) return setStatus('清理失败', 'err');
+    await reload();
+    setStatus(`已清理 ${r.removed} 个过期凭证`, 'ok');
+  }
+
+  async function doCleanGarbage() {
+    if (!state.pool.length) return setStatus('池子是空的', 'err');
+    if (!confirm('清掉已过期的，和不像 token 的条目？\n\n建议先点「备份」再清。')) return;
+
+    const r = await send({ type: 'clean-garbage' });
+    if (!r?.ok) return setStatus('清理失败', 'err');
+    await reload();
+
+    const sample = (r.dropped || []).slice(0, 3).map((x) => `${x.name}（${x.reason}）`).join('、');
+    setStatus(`已清理 ${r.removed} 个${sample ? '：' + sample : ''}`, 'ok');
+  }
+
+  async function doSessionClear() {
+    const n = Object.keys(state.sessions || {}).length;
+    if (!n) return setStatus('没有会话快照', 'err');
+    if (!confirm(`清空 ${n} 个站点的登录态快照？\n\n清掉之后这些站点就没法一键恢复了。`)) return;
+
+    const r = await send({ type: 'session-clear' });
+    if (!r?.ok) return setStatus('清空失败', 'err');
+    state.sessions = r.sessions || {};
+    renderList();
+    setStatus('已清空会话快照', 'ok');
   }
 
   async function doCheckAll(btn) {

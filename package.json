@@ -1,7 +1,7 @@
 {
   "name": "token-exporter",
-  "version": "5.0.0",
-  "description": "Chrome/Edge 扩展：导出网页登录凭证，支持设备码授权和任意站点抓取",
+  "version": "6.6.0",
+  "description": "Chrome/Edge 扩展：导出并恢复网页登录态，支持设备码授权和任意站点抓取",
   "private": true,
   "author": "Faynt",
   "type": "module",

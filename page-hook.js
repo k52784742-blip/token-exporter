@@ -207,7 +207,15 @@
   window.addEventListener('message', (ev) => {
     if (ev.source !== window) return;
     const d = ev.data;
-    if (!d || d.__tk !== 'hs') return;
+    if (!d || !d.__tk) return;
+
+    // 浮窗里点"扫描"走这条：它同一时刻可能还没握手完，直接触发一次重扫最省事
+    if (d.__tk === 'rescan') {
+      if (!disabled) { scanStorage(); scanIndexedDB(); }
+      return;
+    }
+
+    if (d.__tk !== 'hs') return;
 
     try {
       const ch = new MessageChannel();

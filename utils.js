@@ -45,15 +45,6 @@ export function normalizeEpoch(value) {
   return n > 1e11 ? Math.floor(n / 1000) : Math.floor(n);
 }
 
-export function humanLeft(ms) {
-  if (!ms || ms <= 0) return '已过期';
-  const d = Math.floor(ms / 86400000);
-  const h = Math.floor((ms % 86400000) / 3600000);
-  if (d > 0) return d + ' 天';
-  if (h > 0) return h + ' 小时';
-  return Math.max(1, Math.floor(ms / 60000)) + ' 分钟';
-}
-
 export function todayStamp() {
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
@@ -170,8 +161,8 @@ export function toGenericExport(row) {
  * ========================================================================*/
 
 /**
- * 把毫秒差格式化成紧凑的中文时长。
- * 相比 humanLeft 更细：区分「刚刚 / 分钟 / 小时 / 天 / 月」。
+ * 把毫秒差格式化成中文时长，区分「刚刚 / 分钟 / 小时 / 天」。
+ * 负数走「已过期 X」分支。
  */
 export function humanLeftLong(ms) {
   if (ms == null || !Number.isFinite(ms)) return '—';

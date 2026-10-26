@@ -1283,6 +1283,20 @@ async function onSessionFile(ev) {
 }
 
 
+async function clearSessions() {
+  const n = Object.keys(state.sessions || {}).length;
+  if (!n) return setStatus('没有会话快照', 'err');
+  if (!confirm(`清空 ${n} 个站点的登录态快照？\n\n清掉之后这些站点就没法一键恢复了。`)) return;
+
+  const r = await send({ type: 'session-clear' });
+  if (!r?.ok) return setStatus('清空失败', 'err');
+
+  state.sessions = r.sessions || {};
+  renderList();
+  setStatus('已清空会话快照', 'ok');
+}
+
+
 function bind() {  $('platform').addEventListener('change', (e) => {
     const id = e.target.value;
     state.activePlatform = state.platforms.find((p) => p.id === id)
@@ -1436,6 +1450,7 @@ function bind() {  $('platform').addEventListener('change', (e) => {
   $('btn-sess-restore').addEventListener('click', () => restoreSessionByHost(''));
   $('btn-sess-export').addEventListener('click', exportSessions);
   $('btn-sess-import').addEventListener('click', () => $('sess-file').click());
+  $('btn-sess-clear').addEventListener('click', clearSessions);
   $('sess-file').addEventListener('change', onSessionFile);
 
   // 会话详情
