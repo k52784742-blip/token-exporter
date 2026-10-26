@@ -585,7 +585,7 @@ function closeDetail() {
 }
 
 /** 会话详情：点行进来先看清里面有什么，再决定恢复还是删 */
-function openSessionDetail(host, who) {
+async function openSessionDetail(host, who) {
   const root = (state.sessions || {})[host];
   if (!root) return;
   const rows = [root, ...(root.alts || [])];
@@ -595,6 +595,12 @@ function openSessionDetail(host, who) {
   state.sDetail = { host, who: snap.summary?.who || '' };
   const sm = snap.summary || {};
   const now = Date.now();
+
+  // 规则要按这个详情自己的域名取，不能拿当前标签页的
+  const rr = await send({ type: 'get-site-rule', host });
+  const snapRule = rr?.ok
+    ? { hook: rr.hook !== false, snapshot: rr.snapshot !== false, restore: rr.restore !== false }
+    : {};
 
   const cookies = Array.isArray(snap.cookies) ? snap.cookies : [];
   const local = snap.storage?.local || {};
@@ -631,9 +637,34 @@ function openSessionDetail(host, who) {
       <span class="dk">sessionStorage · ${Object.keys(session).length}</span>
       <div class="chip-list">${Object.keys(session).slice(0, 40).map((k) => `<span class="chip">${escapeHtmlSafe(k)}</span>`).join('')}</div>
     </div>` : ''}
+
+    <div class="drow col">
+      <span class="dk">这个站点</span>
+      <div class="chip-list">
+        <button class="chip toggle ${snapRule.snapshot === false ? 'off' : 'on'}" data-rule="snapshot">自动保存${snapRule.snapshot === false ? '已关' : '开着'}</button>
+        <button class="chip toggle ${snapRule.restore === false ? 'off' : 'on'}" data-rule="restore">自动恢复${snapRule.restore === false ? '已关' : '开着'}</button>
+      </div>
+    </div>
   `;
 
   $('sdetail').hidden = false;
+}
+
+// 详情面板里那两个站点开关：点了立刻落盘，不用重开面板
+async function toggleSiteOption(key) {
+  const host = state.sDetail?.host;
+  if (!host) return;
+  const r0 = await send({ type: 'get-site-rule', host });
+  const cur = r0?.ok
+    ? { hook: r0.hook !== false, snapshot: r0.snapshot !== false, restore: r0.restore !== false }
+    : {};
+  const next = { ...cur, [key]: cur[key] === false };
+  const r = await send({ type: 'set-site-rule', host, ...next });
+  if (!r?.ok) { setStatus('没存上，再点一次', 'err'); return; }
+  const on = next[key] !== false;
+  setStatus(on ? '这个站点已恢复自动' + (key === 'snapshot' ? '保存' : '恢复')
+    : '这个站点不再自动' + (key === 'snapshot' ? '保存' : '恢复'));
+  openSessionDetail(host, state.sDetail.who);
 }
 
 function closeSessionDetail() {
@@ -882,6 +913,7 @@ async function loadSiteRule() {
   const r = await send({ type: 'get-site-rule', host });
   const on = r?.ok ? r.hook !== false : true;
   state.siteHook = on;
+  state.siteRule = r?.ok ? { hook: r.hook !== false, snapshot: r.snapshot !== false, restore: r.restore !== false } : {};
   const btn = $('btn-site-toggle');
   if (btn) {
     btn.textContent = on ? '本站已开' : '本站已关';
@@ -1410,6 +1442,8 @@ function bind() {  $('platform').addEventListener('change', (e) => {
   $('sdetail-close').addEventListener('click', closeSessionDetail);
   $('sdetail').addEventListener('click', (e) => {
     if (e.target.id === 'sdetail') closeSessionDetail();
+    const tg = e.target.closest('[data-rule]');
+    if (tg) toggleSiteOption(tg.dataset.rule);
   });
   $('sdetail-restore').addEventListener('click', () => {
     if (!state.sDetail) return;

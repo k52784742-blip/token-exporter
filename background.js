@@ -744,7 +744,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const r = rules[msg.host] || {};
           sendResponse({
             ok: true,
-            hook: r.hook !== false,      // 默认开
+            hook: r.hook !== false,          // 默认开
+            snapshot: r.snapshot !== false,  // 默认开
+            restore: r.restore !== false,    // 默认开
             rule: r,
           });
           break;
@@ -752,13 +754,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
         case 'set-site-rule': {
           const rules = await getSiteRules();
-          if (msg.hook === null || msg.hook === undefined) {
-            delete rules[msg.host];
-          } else {
-            rules[msg.host] = { ...(rules[msg.host] || {}), hook: !!msg.hook };
+          const cur = { ...(rules[msg.host] || {}) };
+          // 三个开关各自独立，只更新传进来的那几个
+          for (const k of ['hook', 'snapshot', 'restore']) {
+            if (k in msg) cur[k] = !!msg[k];
           }
+          // 全都回到默认值就把这条规则删掉，别留垃圾
+          const isDefault = ['hook', 'snapshot', 'restore'].every((k) => cur[k] !== false);
+          if (isDefault) delete rules[msg.host];
+          else rules[msg.host] = cur;
           await chrome.storage.local.set({ [K.siteRules]: rules });
-          sendResponse({ ok: true, rules });
+          sendResponse({ ok: true, rules, rule: cur });
           break;
         }
 
@@ -925,7 +931,7 @@ function safeHost(url) {
   try { return new URL(url).hostname; } catch (e) { return ''; }
 }
 
-// 右键菜单：抓取当前页 / 复制本站 token
+// 右键菜单：扫凭证 / 存登录态 / 恢复登录态
 function buildMenus() {
   try {
     chrome.contextMenus.removeAll(() => {
@@ -935,6 +941,17 @@ function buildMenus() {
         contexts: ['page', 'selection', 'link'],
       });
       chrome.contextMenus.create({
+        id: 'tk-snap',
+        title: '存下本站登录态',
+        contexts: ['page'],
+      });
+      chrome.contextMenus.create({
+        id: 'tk-restore',
+        title: '恢复本站登录态',
+        contexts: ['page'],
+      });
+      chrome.contextMenus.create({ id: 'tk-sep', type: 'separator', contexts: ['page'] });
+      chrome.contextMenus.create({
         id: 'tk-open',
         title: '打开凭证面板',
         contexts: ['page'],
@@ -943,16 +960,38 @@ function buildMenus() {
   } catch (e) {}
 }
 
+// 菜单里点「扫描」时真把结果收进池子，而不是只弹个空窗
+async function scanIntoPool(tabId) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab) return null;
+  const host = safeHost(tab.url);
+  const cookies = await scanCookies(host).catch(() => []);
+  // 内容脚本那边可能还在跑，给它一点时间把页面里的东西交上来
+  await new Promise((r) => setTimeout(r, 600));
+  return { ok: true, cookies: cookies.length };
+}
+
 try {
-  chrome.contextMenus.onClicked.addListener((info, tab) => {
+  chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     if (!tab?.id) return;
-    if (info.menuItemId === 'tk-scan') {
-      chrome.tabs.sendMessage(tab.id, { type: 'rescan-page' }).catch(() => {});
-      // 把扫描结果拉进池子的活儿交给 popup，这里只触发
-      chrome.action.openPopup?.().catch(() => {});
-    } else if (info.menuItemId === 'tk-open') {
-      chrome.action.openPopup?.().catch(() => {});
-    }
+    const id = info.menuItemId;
+    const host = hostOf(tab.url || '');
+    try {
+      if (id === 'tk-scan') {
+        chrome.tabs.sendMessage(tab.id, { type: 'rescan-page' }).catch(() => {});
+        await scanIntoPool(tab.id);
+        chrome.action.openPopup?.().catch(() => {});
+      } else if (id === 'tk-snap') {
+        if (!host) return;
+        await snapshotSession(host, tab.id).catch(() => {});
+        chrome.action.openPopup?.().catch(() => {});
+      } else if (id === 'tk-restore') {
+        if (!host) return;
+        await restoreSession(host, tab.id).catch(() => {});
+      } else if (id === 'tk-open') {
+        chrome.action.openPopup?.().catch(() => {});
+      }
+    } catch (e) {}
   });
 } catch (e) {}
 
@@ -1050,6 +1089,45 @@ try {
     // Set-Cookie 属于「额外」响应头，不显式要的话 onCompleted 里看不到
   }, { urls: ['http://*/*', 'https://*/*'] }, ['responseHeaders', 'extraHeaders']);
 } catch (e) {}
+
+// 有些站点用着用着才把会话踢掉（后台过期、异地登录互踢），
+// 这时候不会重新加载页面，光靠 onUpdated 要等用户自己刷新才发现。
+// 这里盯 401/403，一出现就试一次自动恢复。
+const recentAuthFail = new Map(); // host -> 上次处理时间
+
+try {
+  chrome.webRequest.onCompleted.addListener((d) => {
+    if (d.tabId < 0 || d.frameId) return;
+    if (d.statusCode !== 401 && d.statusCode !== 403) return;
+    if (!/^https?:/.test(d.url || '')) return;
+
+    let host = '';
+    try { host = new URL(d.url).hostname; } catch (e) { return; }
+    if (!host) return;
+
+    // 一个页面失效时常并发打一堆请求，攒成一次
+    const now = Date.now();
+    if (now - (recentAuthFail.get(host) || 0) < 30000) return;
+    recentAuthFail.set(host, now);
+    if (recentAuthFail.size > 200) recentAuthFail.clear();
+
+    setTimeout(() => {
+      tryRestore(d.tabId, d.url).catch(() => {});
+    }, 800);
+  }, { urls: ['http://*/*', 'https://*/*'] });
+} catch (e) {}
+
+/** 掉线后试一次自动恢复；恢复不动就什么也别做，别把快照覆盖成登出态 */
+async function tryRestore(tabId, url) {
+  const settings = await getSettings();
+  if (settings.autoRestore === false) return;
+  const host = hostOf(url);
+  if (!host) return;
+  if (!/\./.test(host) && host !== 'localhost') return;
+  const rules = await getSiteRules();
+  if (rules[host]?.restore === false) return;
+  await maybeAutoRestore(host, tabId).catch(() => {});
+}
 
 // 12 小时最多续一次，免得频繁刷新把号刷进风控
 async function maybeAutoRefresh() {

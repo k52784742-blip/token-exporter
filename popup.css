@@ -608,6 +608,27 @@ select:focus { border-color: var(--accent); }
   opacity: .85;
 }
 
+/* 详情里那两个站点开关 */
+.chip.toggle {
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  transition: color .12s, border-color .12s, background .12s;
+}
+.chip.toggle.on {
+  color: #86efac;
+  border-color: #1e3a2a;
+  background: #101c15;
+}
+.chip.toggle.off {
+  color: #8b93a3;
+  border-color: #262a33;
+  background: #14171d;
+}
+.chip.toggle:hover {
+  border-color: #3b4557;
+}
+
 .tok {
   display: block;
   background: #0c0e12;

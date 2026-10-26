@@ -345,6 +345,12 @@
       padding: 1px 5px; border-radius: 4px; background: #12161d; border: 1px solid #1e222b;
       color: #b8c2d4; font-family: ui-monospace, Consolas, monospace; font-size: 9px; }
     .chip .mini-tag { font-style: normal; color: #86efac; font-size: 8.5px; opacity: .85; }
+    .chip-list .chip { margin-left: 0; }
+    .chip.toggle { cursor: pointer; font-family: inherit; font-size: 9.5px;
+      transition: color .12s, border-color .12s, background .12s; }
+    .chip.toggle.on { color: #86efac; border-color: #1e3a2a; background: #101c15; }
+    .chip.toggle.off { color: #8b93a3; border-color: #262a33; background: #14171d; }
+    .chip.toggle:hover { border-color: #3b4557; }
     .tok { display: block; background: #0c0e12; border: 1px solid #1e222b;
       border-radius: 5px; padding: 4px 6px; font-family: ui-monospace, Consolas, monospace;
       font-size: 9.5px; color: #93a3bd; word-break: break-all; user-select: text; }
@@ -1025,7 +1031,7 @@
   /* ---------------- 交互 ---------------- */
 
   /** 会话详情：点行先看清里面有什么，再决定恢复还是删 */
-  function openSessionDetail(host, who) {
+  async function openSessionDetail(host, who) {
     const root0 = (state.sessions || {})[host];
     if (!root0) return;
     const rows = [root0, ...(root0.alts || [])];
@@ -1034,6 +1040,11 @@
 
     const sm = snap.summary || {};
     const now = Date.now();
+    // 规则按这个详情自己的域名取，别用当前页面的
+    const rr = await send({ type: 'get-site-rule', host });
+    const rule = rr?.ok
+      ? { hook: rr.hook !== false, snapshot: rr.snapshot !== false, restore: rr.restore !== false }
+      : {};
     const cookies = Array.isArray(snap.cookies) ? snap.cookies : [];
     const local = snap.storage?.local || {};
     const session = snap.storage?.session || {};
@@ -1075,6 +1086,13 @@
             <span class="dk">sessionStorage · ${sname.length}</span>
             ${chips(sname.slice(0, 40).map((k) => `<span class="chip">${esc(k)}</span>`))}
           </div>` : ''}
+          <div class="drow col">
+            <span class="dk">这个站点</span>
+            <div class="chip-list">
+              <button class="chip toggle ${rule.snapshot === false ? 'off' : 'on'}" data-x="rsnap">自动保存${rule.snapshot === false ? '已关' : '开着'}</button>
+              <button class="chip toggle ${rule.restore === false ? 'off' : 'on'}" data-x="rrestore">自动恢复${rule.restore === false ? '已关' : '开着'}</button>
+            </div>
+          </div>
         </div>
         <div class="sheet-foot">
           <button class="btn" data-x="srestore">恢复这个账号</button>
@@ -1091,6 +1109,17 @@
       if (act === 'srestore') {
         wrap.remove();
         restoreSession(host, sm.who || '');
+      } else if (act === 'rsnap' || act === 'rrestore') {
+        const key = act === 'rsnap' ? 'snapshot' : 'restore';
+        const r0 = await send({ type: 'get-site-rule', host });
+        const cur = r0?.ok
+          ? { hook: r0.hook !== false, snapshot: r0.snapshot !== false, restore: r0.restore !== false }
+          : {};
+        const next = { ...cur, [key]: cur[key] === false };
+        const r2 = await send({ type: 'set-site-rule', host, ...next });
+        if (!r2?.ok) { setStatus('没存上，再点一次', 'err'); return; }
+        wrap.remove();
+        openSessionDetail(host, sm.who || '');
       } else if (act === 'sremove') {
         const label = sm.who ? `${host} 的 ${sm.who}` : host;
         if (!confirm(`删除 ${label} 的会话快照？`)) return;
@@ -1553,6 +1582,9 @@
   async function loadSiteRule() {
     const r = await send({ type: 'get-site-rule', host: location.hostname });
     state.siteHook = r?.ok ? r.hook !== false : true;
+    state.siteRule = r?.ok
+      ? { hook: r.hook !== false, snapshot: r.snapshot !== false, restore: r.restore !== false }
+      : {};
     const btn = els.panel?.querySelector('[data-act="site"]');
     if (btn) {
       btn.textContent = state.siteHook ? '本站' : '本站已关';
